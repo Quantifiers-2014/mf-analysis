@@ -9,7 +9,10 @@
 #              Used only when [settings.features] ter = true.
 # exit_load_pct / exit_load_days : 0 and 0 means no exit load.
 #
-# Values below were checked on 07-Oct-2026. Sources are noted per fund.
+# fund_managers : a name, or { name = "...", since = "YYYY-MM-DD" } (or "YYYY-MM" when only the
+#                 month is published). Shown as "Name (since 03-Oct-2019)" / "Name (since Dec 2014)".
+#
+# Values below were checked on 07/08-Oct-2026. Sources are noted per fund.
 # Fund managers from Zerodha Coin may list only the lead manager.
 
 [settings]
@@ -43,8 +46,9 @@ isin = "INF174K01LC6"
 ter_match = "Kotak Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 30
-fund_managers = ["Hiten Shah"]
-# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+fund_managers = [{ name = "Hiten Shah", since = "2019-10-03" }]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
+# indmoney (manager since)
 
 [[funds]]
 name = "SBI Arbitrage Opportunities Fund"
@@ -55,8 +59,11 @@ isin = "INF200K01QU0"
 ter_match = "SBI Arbitrage"
 exit_load_pct = 0.25
 exit_load_days = 15
-fund_managers = ["Neeraj Kumar", "Ardhendu Bhattacharya"]
-# Sources: mfapi.in (code, ISIN), SBI factsheet Jul-2026 (exit load, managers)
+fund_managers = [
+  { name = "Neeraj Kumar", since = "2012-10" },
+  { name = "Ardhendu Bhattacharya", since = "2024-12" },
+]
+# Sources: mfapi.in (code, ISIN), SBI factsheet Jul-2026 (exit load, managers, since)
 
 [[funds]]
 name = "ICICI Prudential Arbitrage Fund"
@@ -67,8 +74,8 @@ isin = "INF109K016O4"
 ter_match = "ICICI Prudential Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
-fund_managers = ["Darshil Dedhia"]
-# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww (exit load)
+fund_managers = [{ name = "Darshil Dedhia", since = "2024-09" }]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww (exit load, manager since)
 
 [[funds]]
 name = "Invesco India Arbitrage Fund"
@@ -79,8 +86,12 @@ isin = "INF205K01KR8"
 ter_match = "Invesco India Arbitrage Fund"
 exit_load_pct = 0.50
 exit_load_days = 15
-fund_managers = ["Deepak Gupta", "Pradeep Sukte"]
-# Sources: AMFI AAUM page + mfapi.in (code, ISIN), Invesco factsheet Aug-2026 (exit load, managers)
+fund_managers = [
+  { name = "Deepak Gupta", since = "2021-11-11" },
+  { name = "Pradeep Sukte", since = "2026-06-25" },
+]
+# Sources: AMFI AAUM page + mfapi.in (code, ISIN), Invesco factsheet Aug-2026
+# (exit load, managers, since)
 
 [[funds]]
 name = "Aditya Birla Sun Life Arbitrage Fund"
@@ -91,8 +102,9 @@ isin = "INF209K01VP1"
 ter_match = "Aditya Birla Sun Life Arbitrage Fund"
 exit_load_pct = 0.0
 exit_load_days = 0
-fund_managers = ["Lovelish Solanki"]
-# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load Nil since 27-Jul-2026)
+fund_managers = [{ name = "Lovelish Solanki", since = "2014-12" }]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load Nil since
+# 27-Jul-2026), Groww (manager since)
 
 [[funds]]
 name = "Tata Arbitrage Fund"
@@ -103,8 +115,9 @@ isin = "INF277K017Q3"
 ter_match = "Tata Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
-fund_managers = ["Sailesh Jain"]
-# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+fund_managers = [{ name = "Sailesh Jain", since = "2018-12" }]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
+# Groww (manager since)
 
 [[funds]]
 name = "Nippon India Arbitrage Fund"
@@ -115,8 +128,9 @@ isin = "INF204K01XZ7"
 ter_match = "Nippon India Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
-fund_managers = ["Nemish Sheth"]
-# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+fund_managers = [{ name = "Nemish Sheth", since = "2025-03" }]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
+# Groww (manager since)
 
 [[funds]]
 name = "Edelweiss Arbitrage Fund"
@@ -127,5 +141,6 @@ isin = "INF754K01EA4"
 ter_match = "Edelweiss Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
-fund_managers = ["Bhavesh Jain"]
-# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+fund_managers = [{ name = "Bhavesh Jain", since = "2014-06" }]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
+# Groww (manager since)

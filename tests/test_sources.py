@@ -245,3 +245,8 @@ def test_parse_aaum_title_errors(config: AppConfig, title: str, message: str) ->
     content = xlsx_bytes(aaum_rows([(100001, "Alpha", 1.0)], title=title))
     with pytest.raises(SourceError, match=message):
         parse_aaum(content, config.funds)
+
+
+def test_parse_benchmark_ignores_dashes_in_unused_columns() -> None:
+    content = b"Date,Open,High,Low,Close\n01-Oct-2026,-,-,-,2401.35\n"
+    assert parse_benchmark_csv(content)["value"].tolist() == [2401.35]

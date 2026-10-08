@@ -45,7 +45,7 @@ isin = "INF000A01AA1"
 ter_match = "Alpha Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
-fund_managers = ["A. Manager"]
+fund_managers = [{ name = "A. Manager", since = "2019-10-03" }]
 
 [[funds]]
 name = "Beta Arbitrage Fund"
@@ -56,7 +56,7 @@ isin = "INF000B01BB2"
 ter_match = "Beta Arbitrage Fund"
 exit_load_pct = 0.5
 exit_load_days = 15
-fund_managers = ["B. Manager", "C. Manager"]
+fund_managers = ["B. Manager", { name = "C. Manager", since = "2014-12" }]
 """
 
 

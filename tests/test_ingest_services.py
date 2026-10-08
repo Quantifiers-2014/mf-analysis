@@ -3,7 +3,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from arbitrage_analyser import db, ingest, services
+from arbitrage_analyser import db, ingest, metrics, services
 from arbitrage_analyser.config import AppConfig
 from arbitrage_analyser.sources import SourceError
 from arbitrage_analyser.sources.mfapi import SchemeHistory
@@ -145,27 +145,87 @@ def test_ter_unit_flags(conn: db.sqlite3.Connection, config: AppConfig) -> None:
 
 def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None:
     _load_all(conn, config)
-    table = services.fund_comparison(conn, config, "Arbitrage").set_index("Fund")
+    view = services.fund_comparison(conn, config, "Arbitrage")
+    assert view.years == 3
+    assert list(view.table.columns) == [
+        "Fund",
+        "Launch date",
+        "NAV",
+        "Fund manager",
+        "P2P return % (3Y)",
+        "Tracking diff % (3Y)",
+        "AUM (Rs Cr)",
+        "Base TER %",
+        "Total TER %",
+        "Exit load",
+        "Flag",
+    ]
+    table = view.table.set_index("Fund")
     alpha = table.loc["Alpha Arbitrage Fund"]
+    assert alpha["NAV"] == pytest.approx(db.read_nav(conn, 100001).iloc[-1])
+    assert alpha["Fund manager"] == "A. Manager (since 03-Oct-2019)"
+    assert table.loc["Beta Arbitrage Fund", "Fund manager"] == (
+        "B. Manager, C. Manager (since Dec 2014)"
+    )
     assert alpha["AUM (Rs Cr)"] == pytest.approx(75712.34)
     assert alpha["Base TER %"] == pytest.approx(0.33)
     assert alpha["Total TER %"] == pytest.approx(2.32)
     assert alpha["Exit load"] == "0.25% within 15 days"
-    assert alpha["1Y %"] == pytest.approx(7.2, abs=0.1)
-    assert alpha["5Y %"] == pytest.approx(7.2, abs=0.05)
+    assert alpha["P2P return % (3Y)"] == pytest.approx(7.2, abs=0.05)
     # same end date for fund and benchmark: 7.2% - 6.9%
-    assert alpha["TD as of"] == date(2026, 9, 30)
-    assert alpha["TD 3Y %"] == pytest.approx(0.3, abs=0.05)
+    assert alpha["Tracking diff % (3Y)"] == pytest.approx(0.3, abs=0.05)
     assert alpha["Flag"] == ""
     assert table.loc["Beta Arbitrage Fund", "Flag"] == "Exit load 0.5%"
-    assert services.fund_comparison(conn, config, "Liquid").empty
+    # as-of dates move to the info section
+    assert view.nav_as_of["Alpha Arbitrage Fund"] == date(2026, 10, 6)
+    assert view.td_as_of["Alpha Arbitrage Fund"] == date(2026, 9, 30)
+    assert view.ter_as_of and view.aaum_quarter
+    assert services.fund_comparison(conn, config, "Liquid").table.empty
+
+
+@pytest.mark.parametrize("years", [1, 5])
+def test_fund_comparison_period_drives_both_columns(
+    conn: db.sqlite3.Connection, config: AppConfig, years: int
+) -> None:
+    _load_all(conn, config)
+    table = services.fund_comparison(conn, config, "Arbitrage", years).table.set_index("Fund")
+    alpha = table.loc["Alpha Arbitrage Fund"]
+    nav = db.read_nav(conn, 100001)
+    bench = db.read_benchmark(conn, config.settings.benchmark_name)
+    end = bench.index[-1]
+    fund_return = metrics.point_to_point(nav, years)
+    fund_to_end = metrics.point_to_point(nav, years, end)
+    bench_return = metrics.point_to_point(bench, years, end)
+    assert fund_return is not None and fund_to_end is not None and bench_return is not None
+    assert alpha[f"P2P return % ({years}Y)"] == pytest.approx(fund_return * 100)
+    assert alpha[f"Tracking diff % ({years}Y)"] == pytest.approx((fund_to_end - bench_return) * 100)
+    assert "P2P return % (3Y)" not in table.columns
+
+
+def test_fund_comparison_rejects_other_periods(
+    conn: db.sqlite3.Connection, config: AppConfig
+) -> None:
+    with pytest.raises(ValueError, match="years"):
+        services.fund_comparison(conn, config, "Arbitrage", 2)
+
+
+def test_as_of_text() -> None:
+    assert services.as_of_text({}) is None
+    same = {"A": date(2026, 10, 6), "B": date(2026, 10, 6)}
+    assert services.as_of_text(same) == "06-Oct-2026"
+    mixed = {"A": date(2026, 10, 6), "B": date(2026, 10, 3)}
+    assert services.as_of_text(mixed) == "06-Oct-2026 (except B 03-Oct-2026)"
+    assert services.as_of_text({"A": "2026-09-30"}) == "30-Sep-2026"
 
 
 def test_fund_comparison_without_data(conn: db.sqlite3.Connection, config: AppConfig) -> None:
-    table = services.fund_comparison(conn, config, "Arbitrage")
+    view = services.fund_comparison(conn, config, "Arbitrage")
+    table = view.table
     assert len(table) == 2
-    assert table["1Y %"].isna().all()
+    assert table["NAV"].isna().all()
+    assert table["P2P return % (3Y)"].isna().all()
     assert table["AUM (Rs Cr)"].isna().all()
+    assert view.nav_as_of == {} and view.td_as_of == {}
 
 
 def test_rolling_view(conn: db.sqlite3.Connection, config: AppConfig) -> None:
@@ -219,5 +279,5 @@ def test_data_health_reports_funds_without_nav(
 def test_open_ter_flag_marks_fund(conn: db.sqlite3.Connection, config: AppConfig) -> None:
     content = xlsx_bytes(ter_rows([("Alpha Arbitrage Fund", "04/10/2026", 0.33, 0.2)]))
     assert ingest.import_ter(conn, config, content).ok
-    table = services.fund_comparison(conn, config, "Arbitrage").set_index("Fund")
+    table = services.fund_comparison(conn, config, "Arbitrage").table.set_index("Fund")
     assert table.loc["Alpha Arbitrage Fund", "Flag"] == "Open data flag"

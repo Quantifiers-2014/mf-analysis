@@ -50,11 +50,18 @@ def test_features_validation(tmp_path: Path, text: str, message: str) -> None:
 def test_services_hide_ter_and_aaum(config_file_off: Path, db_file: Path) -> None:
     config = load_config(config_file_off)
     with db.connect(db_file) as conn:
-        table = services.fund_comparison(conn, config, "Arbitrage")
+        table = services.fund_comparison(conn, config, "Arbitrage").table
         health = services.data_health(conn, config, date(2026, 10, 8))
-    hidden = {"AUM (Rs Cr)", "Base TER %", "Total TER %", "TER date", "AUM quarter"}
-    assert not hidden & set(table.columns)
-    assert {"1Y %", "Exit load", "Manager"} <= set(table.columns)
+    assert list(table.columns) == [
+        "Fund",
+        "Launch date",
+        "NAV",
+        "Fund manager",
+        "P2P return % (3Y)",
+        "Tracking diff % (3Y)",
+        "Exit load",
+        "Flag",
+    ]
     assert list(health["Dataset"]) == ["NAV", "Benchmark"]
 
 

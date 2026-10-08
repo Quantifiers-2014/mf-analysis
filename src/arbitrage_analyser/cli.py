@@ -5,11 +5,13 @@ python -m arbitrage_analyser import-benchmark FILE.csv
 python -m arbitrage_analyser import-ter FILE
 python -m arbitrage_analyser import-aaum FILE
 python -m arbitrage_analyser check-config
+python -m arbitrage_analyser app
 """
 
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -17,6 +19,18 @@ from pathlib import Path
 from arbitrage_analyser import db, ingest
 from arbitrage_analyser.config import ConfigError, load_config
 from arbitrage_analyser.runtime import config_path, db_path
+
+APP_FILE = Path(__file__).resolve().parent / "app.py"
+
+
+def run_app() -> int:
+    """Start the Streamlit app with this same Python, so the app always finds this package.
+
+    A bare `streamlit run` can pick up a Streamlit installed outside the virtual environment,
+    which then fails with "No module named 'arbitrage_analyser'".
+    """
+    return subprocess.call([sys.executable, "-m", "streamlit", "run", str(APP_FILE)])
+
 
 _IMPORTERS: dict[str, ingest.FileImporter] = {
     "import-benchmark": ingest.import_benchmark,
@@ -41,10 +55,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("refresh", help="download NAV history for all configured funds")
     commands.add_parser("check-config", help="validate config/funds.toml")
+    commands.add_parser("app", help="open the app in your browser")
     for name in _IMPORTERS:
         sub = commands.add_parser(name, help=f"{name.replace('-', ' ')} from a downloaded file")
         sub.add_argument("file", type=Path)
     args = parser.parse_args(argv)
+    if args.command == "app":
+        return run_app()  # the app reports config errors on screen
 
     try:
         config = load_config(config_path())

@@ -75,6 +75,16 @@ def test_app_renders_all_tabs(env: Path, config_file: Path) -> None:
         "Beta Arbitrage Fund",
     ]
 
+    info = " ".join(i.value for i in app.info)
+    assert "point-to-point" in info and "as of" in info
+    assert app.radio(key="cmp_years").value == 3
+    assert "P2P return % (3Y)" in app.dataframe[0].value.columns
+    app.radio(key="cmp_years").set_value(1).run()
+    assert not app.exception
+    cols = list(app.dataframe[0].value.columns)
+    assert "P2P return % (1Y)" in cols and "Tracking diff % (1Y)" in cols
+    assert "over the last 1 year:" in " ".join(i.value for i in app.info)
+
     app.radio(key="roll_window").set_value(5).run()
     assert not app.exception
     app.multiselect(key="roll_funds").set_value([]).run()
@@ -84,7 +94,7 @@ def test_app_renders_all_tabs(env: Path, config_file: Path) -> None:
 def test_app_with_empty_database(env: Path) -> None:
     app = AppTest.from_file(str(APP_PATH), default_timeout=60).run()
     assert not app.exception
-    assert any("No NAV data yet" in c.value for c in app.caption)
+    assert any("No NAV data yet" in i.value for i in app.info)
 
 
 def test_app_shows_config_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -114,3 +124,12 @@ def test_app_refresh_button_shows_result(env: Path, monkeypatch: pytest.MonkeyPa
     next(b for b in app.button if b.label == "Refresh NAV now").click().run()
     assert not app.exception
     assert any("network down" in e.value for e in app.error)
+
+
+def test_cli_app_uses_same_python(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(cli.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
+    assert cli.main(["app"]) == 0
+    assert calls[0][:4] == [cli.sys.executable, "-m", "streamlit", "run"]
+    assert calls[0][4].endswith("arbitrage_analyser/app.py")
+    assert Path(calls[0][4]).exists()

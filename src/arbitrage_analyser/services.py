@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date
 
 import pandas as pd
@@ -12,71 +13,122 @@ from arbitrage_analyser import db, metrics
 from arbitrage_analyser.config import AppConfig, Fund
 
 BENCHMARK_LABEL = "Benchmark"
-TD_YEARS = 3  # tracking difference shown on the Fund comparison screen
+DEFAULT_YEARS = 3  # period selected on the Fund comparison screen when it opens
 
 
 def _pct(value: float | None) -> float | None:
     return None if value is None else value * 100
 
 
-def fund_comparison(conn: sqlite3.Connection, config: AppConfig, category: str) -> pd.DataFrame:
-    """One row per fund in `category` (spec screen 1). Percent columns are in percent units."""
+def return_column(years: int) -> str:
+    return f"P2P return % ({years}Y)"
+
+
+def td_column(years: int) -> str:
+    return f"Tracking diff % ({years}Y)"
+
+
+@dataclass(frozen=True)
+class ComparisonView:
+    """Fund comparison table plus the as-of dates shown above it instead of as columns.
+
+    Each `*_as_of` maps fund name to its date; funds without data are left out.
+    """
+
+    table: pd.DataFrame
+    years: int
+    nav_as_of: dict[str, date]
+    td_as_of: dict[str, date]
+    ter_as_of: dict[str, str]
+    aaum_quarter: dict[str, str]
+
+
+def fund_comparison(
+    conn: sqlite3.Connection, config: AppConfig, category: str, years: int = DEFAULT_YEARS
+) -> ComparisonView:
+    """One row per fund in `category` (spec screen 1). Percent columns are in percent units.
+
+    Returns and tracking difference are point-to-point over the last `years`, annualised.
+    """
+    if years not in metrics.WINDOWS_YEARS:
+        raise ValueError(f"years must be one of {metrics.WINDOWS_YEARS}")
     settings = config.settings
-    funds = config.funds_in(category)
     stored = db.read_funds(conn).set_index("amfi_code")
     ter = db.read_latest_ter(conn).set_index("amfi_code")
     aaum = db.read_latest_aaum(conn).set_index("amfi_code")
     bench = db.read_benchmark(conn, settings.benchmark_name)
-
     flagged_codes = set(db.read_flags(conn, "open")["subject"])
 
     rows = []
-    for fund in funds:
-        nav = db.read_nav(conn, fund.amfi_code)
-        returns = {y: metrics.point_to_point(nav, y) for y in metrics.WINDOWS_YEARS}
-        td, td_end = _tracking_difference_p2p(nav, bench)
+    nav_as_of: dict[str, date] = {}
+    td_as_of: dict[str, date] = {}
+    ter_as_of: dict[str, str] = {}
+    aaum_quarter: dict[str, str] = {}
+    for fund in config.funds_in(category):
+        code = fund.amfi_code
+        nav = db.read_nav(conn, code)
+        td, td_end = _tracking_difference_p2p(nav, bench, years)
+        if not nav.empty:
+            nav_as_of[fund.name] = nav.index[-1].date()
+        if td_end is not None:
+            td_as_of[fund.name] = td_end
         reasons = []
         if fund.exit_load_pct > settings.exit_load_flag_above_pct:
             reasons.append(f"Exit load {fund.exit_load_pct:g}%")
-        if str(fund.amfi_code) in flagged_codes:
+        if str(code) in flagged_codes:
             reasons.append("Open data flag")
-        # Columns ordered as scanned: returns, flag, size and cost, then reference details.
         row: dict[str, object] = {
             "Fund": fund.name,
-            "1Y %": _pct(returns[1]),
-            "3Y %": _pct(returns[3]),
-            "5Y %": _pct(returns[5]),
-            f"TD {TD_YEARS}Y %": _pct(td),
-            "Flag": "; ".join(reasons),
+            "Launch date": stored["launch_date"].get(code),
+            "NAV": float(nav.iloc[-1]) if not nav.empty else None,
+            "Fund manager": ", ".join(m.label() for m in fund.fund_managers),
+            return_column(years): _pct(metrics.point_to_point(nav, years)),
+            td_column(years): _pct(td),
         }
         if settings.aaum_enabled:
-            row["AUM (Rs Cr)"] = aaum["aaum_crore"].get(fund.amfi_code)
+            row["AUM (Rs Cr)"] = aaum["aaum_crore"].get(code)
+            if code in aaum.index:
+                aaum_quarter[fund.name] = str(aaum.at[code, "quarter_end"])
         if settings.ter_enabled:
-            row["Base TER %"] = ter["base_ter"].get(fund.amfi_code)
-            row["Total TER %"] = ter["total_ter"].get(fund.amfi_code)
-        row |= {
-            "Exit load": _exit_load_text(fund),
-            "Manager": ", ".join(fund.fund_managers),
-            "Launch date": stored["launch_date"].get(fund.amfi_code),
-            "NAV date": nav.index[-1].date() if not nav.empty else None,
-            "TD as of": td_end,
-        }
-        if settings.ter_enabled:
-            row["TER date"] = ter["date"].get(fund.amfi_code)
-        if settings.aaum_enabled:
-            row["AUM quarter"] = aaum["quarter_end"].get(fund.amfi_code)
+            row["Base TER %"] = ter["base_ter"].get(code)
+            row["Total TER %"] = ter["total_ter"].get(code)
+            if code in ter.index:
+                ter_as_of[fund.name] = str(ter.at[code, "date"])
+        row["Exit load"] = _exit_load_text(fund)
+        row["Flag"] = "; ".join(reasons)
         rows.append(row)
-    return pd.DataFrame(rows)
+    return ComparisonView(pd.DataFrame(rows), years, nav_as_of, td_as_of, ter_as_of, aaum_quarter)
 
 
-def _tracking_difference_p2p(nav: pd.Series, bench: pd.Series) -> tuple[float | None, date | None]:
-    """Fund minus benchmark annualised return over TD_YEARS, both ending on the same date:
+def as_of_text(dates: Mapping[str, object]) -> str | None:
+    """'05-Oct-2026', or the latest date plus the funds that are behind it."""
+    if not dates:
+        return None
+    latest = max(dates.values(), key=str)
+    behind = [f"{name} {_fmt(d)}" for name, d in dates.items() if d != latest]
+    text = _fmt(latest)
+    return f"{text} (except {', '.join(behind)})" if behind else text
+
+
+def _fmt(value: object) -> str:
+    if isinstance(value, date):
+        return value.strftime("%d-%b-%Y")
+    try:
+        return date.fromisoformat(str(value)).strftime("%d-%b-%Y")
+    except ValueError:
+        return str(value)
+
+
+def _tracking_difference_p2p(
+    nav: pd.Series, bench: pd.Series, years: int
+) -> tuple[float | None, date | None]:
+    """Fund minus benchmark annualised return over `years`, both ending on the same date:
     the earlier of the two series' last dates (the benchmark is uploaded monthly)."""
     if nav.empty or bench.empty:
         return None, None
     end = min(nav.index[-1], bench.index[-1])
-    fund_return = metrics.point_to_point(nav, TD_YEARS, end)
-    bench_return = metrics.point_to_point(bench, TD_YEARS, end)
+    fund_return = metrics.point_to_point(nav, years, end)
+    bench_return = metrics.point_to_point(bench, years, end)
     if fund_return is None or bench_return is None:
         return None, None
     return fund_return - bench_return, end.date()

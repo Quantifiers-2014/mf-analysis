@@ -18,6 +18,25 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class FundManager:
+    """A fund manager and when they started on the fund.
+
+    `since` is the first day of the month when only the month is known (`day_known` False).
+    """
+
+    name: str
+    since: date | None = None
+    day_known: bool = False
+
+    def label(self) -> str:
+        """'Name (since 03-Oct-2019)', 'Name (since Dec 2014)' or 'Name'."""
+        if self.since is None:
+            return self.name
+        when = self.since.strftime("%d-%b-%Y" if self.day_known else "%b %Y")
+        return f"{self.name} (since {when})"
+
+
+@dataclass(frozen=True)
 class Fund:
     name: str
     amc: str
@@ -27,7 +46,7 @@ class Fund:
     ter_match: str
     exit_load_pct: float
     exit_load_days: int
-    fund_managers: tuple[str, ...]
+    fund_managers: tuple[FundManager, ...]
 
 
 @dataclass(frozen=True)
@@ -131,11 +150,36 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
     return settings
 
 
+def _parse_manager(raw: object, where: str) -> FundManager:
+    """A manager is a plain name, or {name = "...", since = "YYYY-MM" or "YYYY-MM-DD"}."""
+    if isinstance(raw, str):
+        if not raw.strip():
+            raise ConfigError(f"{where}: fund manager name must not be empty")
+        return FundManager(raw.strip())
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: fund_managers entries must be names or {{name, since}}")
+    name = _require(raw, "name", str, where).strip()
+    if not name:
+        raise ConfigError(f"{where}: fund manager name must not be empty")
+    if "since" not in raw:
+        return FundManager(name)
+    since = _require(raw, "since", str, where).strip()
+    error = f"{where}: since for {name} must be YYYY-MM or YYYY-MM-DD"
+    if len(since) not in (7, 10):  # rules out other forms fromisoformat accepts, e.g. 20191003
+        raise ConfigError(error)
+    day_known = len(since) == 10
+    try:
+        start = date.fromisoformat(since if day_known else f"{since}-01")
+    except ValueError as exc:
+        raise ConfigError(error) from exc
+    return FundManager(name, start, day_known)
+
+
 def _parse_fund(raw: dict[str, Any], index: int) -> Fund:
     where = f"[[funds]] #{index + 1}"
     managers = _require(raw, "fund_managers", list, where)
-    if not all(isinstance(m, str) and m.strip() for m in managers):
-        raise ConfigError(f"{where}: fund_managers must be a list of names")
+    if not managers:
+        raise ConfigError(f"{where}: fund_managers must list at least one manager")
     fund = Fund(
         name=_require(raw, "name", str, where).strip(),
         amc=_require(raw, "amc", str, where).strip(),
@@ -145,7 +189,7 @@ def _parse_fund(raw: dict[str, Any], index: int) -> Fund:
         ter_match=_require(raw, "ter_match", str, where).strip(),
         exit_load_pct=float(_require(raw, "exit_load_pct", (int, float), where)),
         exit_load_days=_require(raw, "exit_load_days", int, where),
-        fund_managers=tuple(m.strip() for m in managers),
+        fund_managers=tuple(_parse_manager(m, where) for m in managers),
     )
     for field_name in ("name", "amc", "category", "ter_match"):
         if not getattr(fund, field_name):
