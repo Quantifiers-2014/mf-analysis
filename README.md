@@ -66,6 +66,42 @@ python -m arbitrage_analyser app
 Run it with the virtual environment active. It starts Streamlit with the same Python, so the
 app always finds this package.
 
+## Ask the analyst (AI agent, Phase 1)
+
+The **Ask the analyst** tab is a chat that answers questions about the funds in the database.
+An AI model uses read-only tools over the same data and calculations as the other screens, so
+every figure comes from the database, with its source and as-of date. It declines questions
+outside mutual funds, says when it is unsure or data is missing, and asks a clarifying question
+when one is needed.
+
+Setup (once):
+
+```bash
+pip install -e ".[agent]"
+copy .env.example .env          # macOS/Linux: cp .env.example .env
+```
+
+Put a Google Gemini API key (free from <https://aistudio.google.com/apikey>) in `.env` after
+`GEMINI_API_KEY=`, then restart the app. `.env` is git-ignored; never share it.
+
+- Model: Gemini `gemini-3.8-flash` by default. Change it with `ARBITRAGE_AGENT_MODEL`. To use
+  Claude, set `ARBITRAGE_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`; for Groq, OpenRouter
+  or Ollama use `openai_compatible` (see `.env.example`). The sidebar shows the model in use.
+- Free tiers allow only a few requests per minute and per day, and one question takes 2 to 4
+  requests. On the free tier Google may use prompts to improve its products, so do not type
+  confidential information into the chat.
+- Conversations are saved in `data/chat.db` (override with `ARBITRAGE_CHAT_DB`), under the name
+  in the sidebar, so you can reopen them later. Each answer is stored with the tool calls
+  behind it, model, tokens, time taken, Langfuse trace id and any thumbs up/down.
+- Langfuse tracing: fill in `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (and
+  `LANGFUSE_BASE_URL` if not on Langfuse's EU cloud). Each question is one trace
+  (session = conversation) showing every model call and tool call; thumbs up/down are sent as a
+  `user_feedback` score.
+- The instructions are in `src/arbitrage_analyser/agent/prompt.py`; bump `PROMPT_VERSION` when
+  you change them.
+- Limits for now: no web search or file uploads, the last 30 messages of a conversation are sent
+  with each question, and answers are text and tables only (no charts yet).
+
 ## Daily NAV refresh
 
 macOS/Linux (cron, 8:30 pm daily):
@@ -115,6 +151,8 @@ src/arbitrage_analyser/
   services.py              screen read models (reusable by a future API or chatbot)
   cli.py                   command line
   app.py                   Streamlit UI
+  chat_ui.py               "Ask the analyst" chat tab
+  agent/                   AI agent: tools, prompt, Claude loop, chat storage, Langfuse tracing
 tests/                     unit and app tests
 ```
 

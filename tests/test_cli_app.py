@@ -4,8 +4,9 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from arbitrage_analyser import cli, db, ingest
+from arbitrage_analyser.agent.store import CHAT_DB_ENV
 from arbitrage_analyser.config import load_config
-from arbitrage_analyser.runtime import CONFIG_ENV, DB_ENV
+from arbitrage_analyser.runtime import CONFIG_ENV, DB_ENV, ENV_FILE_ENV
 from tests.conftest import benchmark_csv, growth_series, history_for
 
 APP_PATH = Path(__file__).resolve().parents[1] / "src" / "arbitrage_analyser" / "app.py"
@@ -15,6 +16,17 @@ APP_PATH = Path(__file__).resolve().parents[1] / "src" / "arbitrage_analyser" / 
 def env(monkeypatch: pytest.MonkeyPatch, config_file: Path, db_file: Path) -> Path:
     monkeypatch.setenv(CONFIG_ENV, str(config_file))
     monkeypatch.setenv(DB_ENV, str(db_file))
+    monkeypatch.setenv(CHAT_DB_ENV, str(db_file.with_name("chat.db")))
+    monkeypatch.setenv(ENV_FILE_ENV, str(db_file.with_name("no.env")))
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_COMPAT_API_KEY",
+        "OPENAI_COMPAT_BASE_URL",
+        "ARBITRAGE_AGENT_PROVIDER",
+        "ARBITRAGE_AGENT_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
     return db_file
 
 
@@ -68,7 +80,12 @@ def test_app_renders_all_tabs(env: Path, config_file: Path) -> None:
     _seed(env, config_file)
     app = AppTest.from_file(str(APP_PATH), default_timeout=60).run()
     assert not app.exception
-    assert [t.label for t in app.tabs] == ["Fund comparison", "Rolling returns", "Data health"]
+    assert [t.label for t in app.tabs] == [
+        "Fund comparison",
+        "Rolling returns",
+        "Data health",
+        "Ask the analyst",
+    ]
     assert len(app.dataframe) == 3  # comparison, rolling stats, freshness
     assert app.multiselect(key="roll_funds").value == [
         "Alpha Arbitrage Fund",
@@ -131,5 +148,5 @@ def test_cli_app_uses_same_python(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
     assert cli.main(["app"]) == 0
     assert calls[0][:4] == [cli.sys.executable, "-m", "streamlit", "run"]
-    assert calls[0][4].endswith("arbitrage_analyser/app.py")
+    assert Path(calls[0][4]).parts[-2:] == ("arbitrage_analyser", "app.py")  # any OS
     assert Path(calls[0][4]).exists()
