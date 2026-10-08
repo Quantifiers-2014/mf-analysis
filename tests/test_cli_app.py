@@ -148,5 +148,5 @@ def test_cli_app_uses_same_python(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli.subprocess, "call", lambda cmd: calls.append(cmd) or 0)
     assert cli.main(["app"]) == 0
     assert calls[0][:4] == [cli.sys.executable, "-m", "streamlit", "run"]
-    assert calls[0][4].endswith("arbitrage_analyser/app.py")
+    assert Path(calls[0][4]).parts[-2:] == ("arbitrage_analyser", "app.py")  # any OS
     assert Path(calls[0][4]).exists()
