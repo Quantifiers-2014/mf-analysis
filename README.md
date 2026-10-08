@@ -15,6 +15,21 @@ pip install -e ".[dev]"
 python -m arbitrage_analyser check-config
 ```
 
+## First run, in order
+
+```bash
+cd arbitrage-analyser                       # the unzipped folder (it contains pyproject.toml)
+python3 -m venv .venv
+source .venv/bin/activate                   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"                     # "." = this folder; [dev] adds test tools
+python -m arbitrage_analyser refresh        # load NAVs
+python -m arbitrage_analyser import-benchmark ~/Downloads/benchmark.csv
+python -m arbitrage_analyser app            # opens the app in your browser
+```
+
+The benchmark can also be uploaded later on the app's Data health tab instead of the
+`import-benchmark` command.
+
 ## Load data
 
 TER and Average AUM are **switched off** for now (`[settings.features]` in `config/funds.toml`).
@@ -45,8 +60,11 @@ scheme code, ISIN and "Direct Plan - Growth" in the source match `config/funds.t
 ## Run the app
 
 ```bash
-streamlit run src/arbitrage_analyser/app.py
+python -m arbitrage_analyser app
 ```
+
+Run it with the virtual environment active. It starts Streamlit with the same Python, so the
+app always finds this package.
 
 ## Ask the analyst (AI agent, Phase 1)
 
@@ -112,7 +130,7 @@ Back up by copying the `.db` file.
 | NAV | Scheme code, ISIN, Direct Growth plan match config | Fund skipped, error shown |
 | NAV | Duplicate dates, zero/negative values, gaps over 5 days | Flag |
 | NAV, benchmark | Daily move above 10x the median daily move of the last 250 days | Flag |
-| Benchmark | Zero/negative, duplicate or weekend dates | File rejected |
+| Benchmark | Zero/negative values or duplicate dates | File rejected |
 | Benchmark | Stored dates must match within 0.01 | File rejected |
 | TER | Value outside 0–5%, total below base | Flag |
 

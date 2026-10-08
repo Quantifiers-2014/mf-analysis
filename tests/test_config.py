@@ -1,8 +1,9 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from arbitrage_analyser.config import DEFAULT_CONFIG_PATH, ConfigError, load_config
+from arbitrage_analyser.config import DEFAULT_CONFIG_PATH, ConfigError, FundManager, load_config
 from tests.conftest import CONFIG_TEXT
 
 
@@ -21,7 +22,10 @@ def test_shipped_config_is_valid() -> None:
 
 def test_fixture_config_loads(config_file: Path) -> None:
     config = load_config(config_file)
-    assert config.fund_by_code(100002).fund_managers == ("B. Manager", "C. Manager")
+    assert config.fund_by_code(100002).fund_managers == (
+        FundManager("B. Manager"),
+        FundManager("C. Manager", date(2014, 12, 1), day_known=False),
+    )
     assert [f.name for f in config.funds_in("Arbitrage")] == [
         "Alpha Arbitrage Fund",
         "Beta Arbitrage Fund",
@@ -36,8 +40,8 @@ def test_fixture_config_loads(config_file: Path) -> None:
         ('isin = "INF000A01AA1"', 'isin = "US0000000001"', "not a mutual fund ISIN"),
         ("amfi_code = 100002", "amfi_code = 100001", "duplicate amfi_code"),
         (
-            'exit_load_days = 15\nfund_managers = ["A',
-            'exit_load_days = 0\nfund_managers = ["A',
+            "exit_load_days = 15\nfund_managers = [{",
+            "exit_load_days = 0\nfund_managers = [{",
             "both be 0",
         ),
         ("nav = [4, 7]", "nav = [7, 4]", "Due must be below Overdue"),
@@ -45,6 +49,16 @@ def test_fixture_config_loads(config_file: Path) -> None:
         ("amfi_code = 100001", 'amfi_code = "100001"', "wrong type"),
         ("outlier_multiplier = 10.0", "outlier_multiplier = true", "true/false"),
         ('ter_match = "Alpha Arbitrage Fund"', 'ter_match = " "', "must not be empty"),
+        ('since = "2019-10-03"', 'since = "03-10-2019"', "YYYY-MM or YYYY-MM-DD"),
+        ('since = "2014-12"', 'since = "2014-13"', "YYYY-MM or YYYY-MM-DD"),
+        ('since = "2019-10-03"', 'since = "20191003"', "YYYY-MM or YYYY-MM-DD"),
+        ('["B. Manager", {', '[" ", {', "name must not be empty"),
+        ('["B. Manager", {', "[5, {", "names or"),
+        (
+            'fund_managers = [{ name = "A. Manager", since = "2019-10-03" }]',
+            "fund_managers = []",
+            "at least one manager",
+        ),
     ],
 )
 def test_invalid_config_is_rejected(tmp_path: Path, old: str, new: str, message: str) -> None:
@@ -60,3 +74,11 @@ def test_missing_file_and_bad_toml(tmp_path: Path) -> None:
         load_config(_write(tmp_path, "[settings\n"))
     with pytest.raises(ConfigError, match="missing 'funds'"):
         load_config(_write(tmp_path, CONFIG_TEXT.split("[[funds]]")[0]))
+
+
+def test_manager_labels() -> None:
+    assert FundManager("Hiten Shah", date(2019, 10, 3), True).label() == (
+        "Hiten Shah (since 03-Oct-2019)"
+    )
+    assert FundManager("L. Solanki", date(2014, 12, 1)).label() == "L. Solanki (since Dec 2014)"
+    assert FundManager("No Date").label() == "No Date"

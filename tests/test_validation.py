@@ -74,10 +74,6 @@ def test_benchmark_upload_accepts_matching_overlap(config: AppConfig) -> None:
     [
         (lambda f: f.assign(value=f["value"].where(f.index != 3, -1.0)), "negative"),
         (lambda f: pd.concat([f, f.iloc[[2]]]), "Duplicate dates"),
-        (
-            lambda f: f.assign(date=f["date"].where(f.index != 4, pd.Timestamp("2026-06-06"))),
-            "Weekend",
-        ),
         (lambda f: f.assign(value=f["value"] + 1.0), "different values"),
     ],
 )
@@ -88,3 +84,11 @@ def test_benchmark_upload_rejections(config: AppConfig, mutate, message: str) ->
     check = check_benchmark_upload(upload, stored, config.settings)
     assert not check.accepted
     assert message in " ".join(check.rejections)
+
+
+def test_benchmark_upload_accepts_special_weekend_sessions(config: AppConfig) -> None:
+    # NSE traded on Sunday 01-Feb-2026 (Budget day); the index has a value that day.
+    days = pd.to_datetime(["2026-01-29", "2026-01-30", "2026-02-01", "2026-02-02"])
+    upload = pd.DataFrame({"date": days, "value": [1000.0, 1000.2, 1000.3, 1000.4]})
+    check = check_benchmark_upload(upload, pd.Series(dtype=float), config.settings)
+    assert check.accepted

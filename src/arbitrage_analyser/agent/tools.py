@@ -49,14 +49,21 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "compare_funds",
         "description": (
-            "The fund comparison table for a category: annualised 1Y, 3Y and 5Y point-to-point "
-            "returns, 3Y tracking difference against the benchmark, exit load, managers and "
-            "data flags. Returns are in percent, ending on each fund's latest NAV date."
+            "The fund comparison table for a category over one period (1, 3 or 5 years): "
+            "annualised point-to-point return, tracking difference against the benchmark, "
+            "latest NAV, launch date, fund managers (with start dates), exit load and data "
+            "flags. Returns are in percent, ending on each fund's latest NAV date. Call once "
+            "per period to compare several periods."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "category": {"type": "string", "description": "Fund category, e.g. 'Arbitrage'."}
+                "category": {"type": "string", "description": "Fund category, e.g. 'Arbitrage'."},
+                "years": {
+                    "type": "integer",
+                    "enum": [1, 3, 5],
+                    "description": "Period in years. Default 3.",
+                },
             },
             "required": ["category"],
         },
@@ -197,7 +204,7 @@ def list_funds(conn: sqlite3.Connection, config: AppConfig, args: dict[str, Any]
                 "plan": "Direct Plan - Growth",
                 "exit_load_pct": fund.exit_load_pct,
                 "exit_load_days": fund.exit_load_days,
-                "fund_managers": list(fund.fund_managers),
+                "fund_managers": [m.label() for m in fund.fund_managers],
                 "launch_date": stored["launch_date"].get(fund.amfi_code),
                 "latest_nav": float(nav.iloc[-1]) if not nav.empty else None,
                 "latest_nav_date": nav.index[-1] if not nav.empty else None,
@@ -221,17 +228,25 @@ def compare_funds(
     category = str(args.get("category", ""))
     if category not in config.categories():
         raise ToolError(f"Unknown category {category!r}. Known: {config.categories()}")
-    table = services.fund_comparison(conn, config, category)
-    nav_dates = table["NAV date"].dropna() if not table.empty else []
-    notes = ["Returns are annualised (CAGR) point-to-point, in percent."]
-    if table.empty or table[f"TD {services.TD_YEARS}Y %"].isna().all():
+    years = int(args.get("years", services.DEFAULT_YEARS))
+    if years not in metrics.WINDOWS_YEARS:
+        raise ToolError(f"years must be one of {list(metrics.WINDOWS_YEARS)}")
+    view = services.fund_comparison(conn, config, category, years)
+    notes = [
+        f"Returns and tracking difference are annualised point-to-point over {years} year(s), "
+        "in percent."
+    ]
+    if not view.td_as_of:
         notes.append("Tracking difference is empty because no benchmark data is loaded.")
     return _out(
         {
-            "rows": _records(table),
+            "rows": _records(view.table),
+            "years": years,
+            "nav_as_of_by_fund": view.nav_as_of,
+            "tracking_difference_as_of_by_fund": view.td_as_of,
             "notes": notes,
             "source": NAV_SOURCE,
-            "as_of": max(nav_dates) if len(nav_dates) else None,
+            "as_of": max(view.nav_as_of.values()) if view.nav_as_of else None,
         }
     )
 

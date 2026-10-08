@@ -18,7 +18,7 @@ flags = pd.read_sql("SELECT * FROM validation_flags", conn)
 conn.close()
 
 # Make NAV easier to read: one row per date, one column per fund.
-names = dict(zip(funds["amfi_code"], funds["scheme_name"].str.split(" - ").str[0]))
+names = dict(zip(funds["amfi_code"], funds["scheme_name"].str.split(" - ").str[0], strict=True))
 nav["fund"] = nav["amfi_code"].map(names)
 nav_wide = nav.pivot(index="date", columns="fund", values="nav").sort_index(ascending=False)
 
@@ -28,4 +28,5 @@ with pd.ExcelWriter("data/arbitrage_data.xlsx") as writer:
     nav_wide.to_excel(writer, sheet_name="NAV by date")
     flags.to_excel(writer, sheet_name="Data flags", index=False)
 
-print(f"Saved data/arbitrage_data.xlsx: {len(funds)} funds, {len(nav_wide)} dates, {len(flags)} flags")
+counts = f"{len(funds)} funds, {len(nav_wide)} dates, {len(flags)} flags"
+print(f"Saved data/arbitrage_data.xlsx: {counts}")
