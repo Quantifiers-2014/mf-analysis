@@ -18,6 +18,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+agent = [
+    "openai>=1.60",
+    "anthropic>=1.0",
+    "langfuse>=4.0",
+    "python-dotenv>=1.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -51,5 +57,5 @@ files = ["src"]
 # pandas is checked as untyped: pandas-stubs flags most DataFrame/Series code as errors
 # (Hashable index labels, itertuples rows) without finding real defects.
 [[tool.mypy.overrides]]
-module = ["pandas", "pandas.*", "streamlit", "streamlit.*", "altair", "altair.*"]
+module = ["pandas", "pandas.*", "streamlit", "streamlit.*", "altair", "altair.*", "langfuse", "langfuse.*"]
 follow_imports = "skip"

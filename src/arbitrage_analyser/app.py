@@ -1,4 +1,4 @@
-"""Streamlit UI: Fund comparison, Rolling returns, Data health.
+"""Streamlit UI: Fund comparison, Rolling returns, Data health, Ask the analyst (chat).
 
 Run:  streamlit run src/arbitrage_analyser/app.py
 """
@@ -11,9 +11,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from arbitrage_analyser import db, ingest, services
+from arbitrage_analyser import chat_ui, db, ingest, services
 from arbitrage_analyser.config import AppConfig, ConfigError, load_config
-from arbitrage_analyser.runtime import config_path, db_path
+from arbitrage_analyser.runtime import config_path, db_path, load_env_file
 
 MAX_FUNDS = 8
 PCT = st.column_config.NumberColumn(format="%.2f")
@@ -256,19 +256,25 @@ def data_health_tab(config: AppConfig) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Arbitrage Fund Analyser", layout="wide")
+    load_env_file()
     st.title("Arbitrage Fund Analyser")
     try:
         config = load_config(config_path())
     except ConfigError as exc:
         st.error(f"Config error: {exc}")
         st.stop()
-    compare, rolling, health = st.tabs(["Fund comparison", "Rolling returns", "Data health"])
+    chat_ui.chat_sidebar()
+    compare, rolling, health, chat = st.tabs(
+        ["Fund comparison", "Rolling returns", "Data health", "Ask the analyst"]
+    )
     with compare:
         fund_comparison_tab(config)
     with rolling:
         rolling_returns_tab(config)
     with health:
         data_health_tab(config)
+    with chat:
+        chat_ui.chat_tab(config)
 
 
 main()
