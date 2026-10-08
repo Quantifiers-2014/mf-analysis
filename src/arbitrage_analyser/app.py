@@ -5,15 +5,24 @@ Run:  python -m arbitrage_analyser app
 
 from __future__ import annotations
 
+import sys
 from datetime import date
+from pathlib import Path
 
-import altair as alt
-import pandas as pd
-import streamlit as st
+# Import the package from this source tree, not an installed copy. Streamlit Community Cloud
+# installs the package once at build time and does not reinstall on a code push, so without this
+# a new app.py would run against old modules.
+_SRC = str(Path(__file__).resolve().parents[1])
+if sys.path[0] != _SRC:
+    sys.path.insert(0, _SRC)
 
-from arbitrage_analyser import db, ingest, metrics, services
-from arbitrage_analyser.config import AppConfig, ConfigError, load_config
-from arbitrage_analyser.runtime import config_path, db_path
+import altair as alt  # noqa: E402
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from arbitrage_analyser import db, ingest, metrics, services  # noqa: E402
+from arbitrage_analyser.config import AppConfig, ConfigError, load_config  # noqa: E402
+from arbitrage_analyser.runtime import config_path, db_path  # noqa: E402
 
 MAX_FUNDS = 8
 PCT = st.column_config.NumberColumn(format="%.2f")
