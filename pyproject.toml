@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arbitrage-analyser"
+version = "0.1.0"
+description = "Internal tool to compare Indian arbitrage mutual funds on returns, costs and size."
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "streamlit>=1.50",
+    "altair>=5.0",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+    "lxml>=5.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "types-requests",
+]
+
+[project.scripts]
+arbitrage-analyser = "arbitrage_analyser.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+files = ["src"]
+
+# pandas is checked as untyped: pandas-stubs flags most DataFrame/Series code as errors
+# (Hashable index labels, itertuples rows) without finding real defects.
+[[tool.mypy.overrides]]
+module = ["pandas", "pandas.*", "streamlit", "streamlit.*", "altair", "altair.*"]
+follow_imports = "skip"

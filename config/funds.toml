@@ -1,0 +1,131 @@
+# Arbitrage Fund Analyser - fund configuration.
+#
+# Edit this file to add funds or update exit loads and fund managers.
+# Every fund must be the DIRECT plan, GROWTH option.
+#
+# amfi_code  : AMFI scheme code. Checked against the NAV source on every refresh.
+# isin       : ISIN of the direct growth plan. Must match the NAV source.
+# ter_match  : text that identifies the fund's row in the AMFI TER file (case-insensitive).
+#              Used only when [settings.features] ter = true.
+# exit_load_pct / exit_load_days : 0 and 0 means no exit load.
+#
+# Values below were checked on 07-Oct-2026. Sources are noted per fund.
+# Fund managers from Zerodha Coin may list only the lead manager.
+
+[settings]
+history_start = "2019-01-01"     # NAV and benchmark data are stored from this date
+benchmark_name = "NIFTY 50 Arbitrage"
+exit_load_flag_above_pct = 0.25  # Fund comparison flags exit loads above this
+outlier_multiplier = 10.0        # Flag a daily move above N x the median daily move
+outlier_lookback_days = 250      # Trading days used to compute the median daily move
+outlier_min_history = 60         # Skip the outlier check until this many days exist
+max_gap_days = 5                 # Flag a gap longer than this many calendar days
+overlap_tolerance = 0.01         # Benchmark re-upload must match stored values within this
+
+# Switch optional datasets on or off. Off hides their columns, uploads, commands and freshness rows.
+[settings.features]
+ter = false    # TER breakdown from the AMFI TER file
+aaum = false   # Average AUM from the AMFI AAUM file
+
+# Freshness: days since the latest data date. Due after the first number, Overdue after the second.
+[settings.freshness]
+nav = [4, 7]
+ter = [45, 60]
+aaum = [110, 140]
+benchmark = [45, 60]
+
+[[funds]]
+name = "Kotak Arbitrage Fund"
+amc = "Kotak"
+category = "Arbitrage"
+amfi_code = 119771
+isin = "INF174K01LC6"
+ter_match = "Kotak Arbitrage Fund"
+exit_load_pct = 0.25
+exit_load_days = 30
+fund_managers = ["Hiten Shah"]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+
+[[funds]]
+name = "SBI Arbitrage Opportunities Fund"
+amc = "SBI"
+category = "Arbitrage"
+amfi_code = 119574
+isin = "INF200K01QU0"
+ter_match = "SBI Arbitrage"
+exit_load_pct = 0.25
+exit_load_days = 15
+fund_managers = ["Neeraj Kumar", "Ardhendu Bhattacharya"]
+# Sources: mfapi.in (code, ISIN), SBI factsheet Jul-2026 (exit load, managers)
+
+[[funds]]
+name = "ICICI Prudential Arbitrage Fund"
+amc = "ICICI Prudential"
+category = "Arbitrage"
+amfi_code = 120364
+isin = "INF109K016O4"
+ter_match = "ICICI Prudential Arbitrage Fund"
+exit_load_pct = 0.25
+exit_load_days = 15
+fund_managers = ["Darshil Dedhia"]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww (exit load)
+
+[[funds]]
+name = "Invesco India Arbitrage Fund"
+amc = "Invesco"
+category = "Arbitrage"
+amfi_code = 120401
+isin = "INF205K01KR8"
+ter_match = "Invesco India Arbitrage Fund"
+exit_load_pct = 0.50
+exit_load_days = 15
+fund_managers = ["Deepak Gupta", "Pradeep Sukte"]
+# Sources: AMFI AAUM page + mfapi.in (code, ISIN), Invesco factsheet Aug-2026 (exit load, managers)
+
+[[funds]]
+name = "Aditya Birla Sun Life Arbitrage Fund"
+amc = "Aditya Birla Sun Life"
+category = "Arbitrage"
+amfi_code = 119526
+isin = "INF209K01VP1"
+ter_match = "Aditya Birla Sun Life Arbitrage Fund"
+exit_load_pct = 0.0
+exit_load_days = 0
+fund_managers = ["Lovelish Solanki"]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load Nil since 27-Jul-2026)
+
+[[funds]]
+name = "Tata Arbitrage Fund"
+amc = "Tata"
+category = "Arbitrage"
+amfi_code = 145724
+isin = "INF277K017Q3"
+ter_match = "Tata Arbitrage Fund"
+exit_load_pct = 0.25
+exit_load_days = 15
+fund_managers = ["Sailesh Jain"]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+
+[[funds]]
+name = "Nippon India Arbitrage Fund"
+amc = "Nippon India"
+category = "Arbitrage"
+amfi_code = 118585
+isin = "INF204K01XZ7"
+ter_match = "Nippon India Arbitrage Fund"
+exit_load_pct = 0.25
+exit_load_days = 15
+fund_managers = ["Nemish Sheth"]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
+
+[[funds]]
+name = "Edelweiss Arbitrage Fund"
+amc = "Edelweiss"
+category = "Arbitrage"
+amfi_code = 130206
+isin = "INF754K01EA4"
+ter_match = "Edelweiss Arbitrage Fund"
+exit_load_pct = 0.25
+exit_load_days = 15
+fund_managers = ["Bhavesh Jain"]
+# Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load)
