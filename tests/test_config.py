@@ -51,6 +51,7 @@ def test_fixture_config_loads(config_file: Path) -> None:
         ("amfi_code = 100001", 'amfi_code = "100001"', "wrong type"),
         ("outlier_multiplier = 10.0", "outlier_multiplier = true", "true/false"),
         ('ter_match = "Alpha Arbitrage Fund"', 'ter_match = " "', "must not be empty"),
+        ('"https://example.com/alpha/factsheets"', '"www.example.com"', "https:// link"),
         ('since = "2019-10-03"', 'since = "03-10-2019"', "YYYY-MM or YYYY-MM-DD"),
         ('since = "2014-12"', 'since = "2014-13"', "YYYY-MM or YYYY-MM-DD"),
         ('since = "2019-10-03"', 'since = "20191003"', "YYYY-MM or YYYY-MM-DD"),

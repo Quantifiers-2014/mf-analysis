@@ -96,6 +96,8 @@ def fund_comparison(
                 ter_as_of[fund.name] = str(ter.at[code, "date"])
         row["Exit load"] = _exit_load_text(fund)
         row["Flag"] = "; ".join(reasons)
+        row["Factsheet"] = fund.factsheet_url
+        row["Portfolio"] = fund.portfolio_url
         rows.append(row)
     return ComparisonView(pd.DataFrame(rows), years, nav_as_of, td_as_of, ter_as_of, aaum_quarter)
 

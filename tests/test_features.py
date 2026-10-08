@@ -61,6 +61,8 @@ def test_services_hide_ter_and_aaum(config_file_off: Path, db_file: Path) -> Non
         "Tracking diff % (3Y)",
         "Exit load",
         "Flag",
+        "Factsheet",
+        "Portfolio",
     ]
     assert list(health["Dataset"]) == ["NAV", "Benchmark"]
 

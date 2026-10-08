@@ -141,6 +141,8 @@ def fund_comparison_tab(config: AppConfig) -> None:
             "AUM (Rs Cr)": st.column_config.NumberColumn(format="%,.0f"),
             "Fund manager": st.column_config.TextColumn(width="large"),
             "Flag": st.column_config.TextColumn(width="medium"),
+            "Factsheet": st.column_config.LinkColumn(display_text="Open"),
+            "Portfolio": st.column_config.LinkColumn(display_text="Open"),
         },
     )
     _csv_button(table, f"fund_comparison_{category.lower()}_{years}y.csv", "cmp_csv")

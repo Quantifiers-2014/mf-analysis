@@ -159,11 +159,15 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
         "Total TER %",
         "Exit load",
         "Flag",
+        "Factsheet",
+        "Portfolio",
     ]
     table = view.table.set_index("Fund")
     alpha = table.loc["Alpha Arbitrage Fund"]
     assert alpha["NAV"] == pytest.approx(db.read_nav(conn, 100001).iloc[-1])
     assert alpha["Fund manager"] == "A. Manager (since 03-Oct-2019)"
+    assert alpha["Factsheet"] == "https://example.com/alpha/factsheets"
+    assert alpha["Portfolio"] is None
     assert table.loc["Beta Arbitrage Fund", "Fund manager"] == (
         "B. Manager, C. Manager (since Dec 2014)"
     )
