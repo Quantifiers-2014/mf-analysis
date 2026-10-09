@@ -87,7 +87,6 @@ when one is needed.
 Setup (once):
 
 ```bash
-pip install -e ".[agent]"
 copy .env.example .env          # macOS/Linux: cp .env.example .env
 ```
 

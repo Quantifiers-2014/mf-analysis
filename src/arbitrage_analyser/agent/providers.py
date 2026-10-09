@@ -109,7 +109,7 @@ def setup_problems() -> list[str]:
         ]
     problems = []
     if importlib.util.find_spec(info.package) is None:
-        problems.append('The agent packages are not installed. Run: `pip install -e ".[agent]"`')
+        problems.append('The agent packages are not installed. Run: `pip install -e .`')
     if not os.environ.get(info.key_env):
         problems.append(f"{info.label} is selected but `{info.key_env}` is empty in `.env`.")
     if info.name == "openai_compatible":

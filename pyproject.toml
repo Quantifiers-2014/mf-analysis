@@ -15,15 +15,15 @@ dependencies = [
     "xlrd>=2.0",
     "lxml>=5.0",
     "requests>=2.31",
-]
-
-[project.optional-dependencies]
-agent = [
+    # "Ask the analyst" agent. Regular dependencies, not an extra: Streamlit Community Cloud
+    # installs pyproject.toml without optional extras, so an [agent] extra was never installed there.
     "openai>=1.60",
     "anthropic>=1.0",
     "langfuse>=4.0",
     "python-dotenv>=1.0",
 ]
+
+[project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
