@@ -238,12 +238,20 @@ def compare_funds(
     ]
     if not view.td_as_of:
         notes.append("Tracking difference is empty because no benchmark data is loaded.")
+    if config.settings.ter_enabled:
+        notes.append(
+            "BER % and Total TER % are Direct Plan expense ratios from AMFI, each as of the date "
+            "in ter_as_of_by_fund; funds missing there have no TER loaded."
+        )
     return _out(
         {
             "rows": _records(view.table),
             "years": years,
             "nav_as_of_by_fund": view.nav_as_of,
             "tracking_difference_as_of_by_fund": view.td_as_of,
+            "ter_as_of_by_fund": view.ter_as_of,
+            "aum_quarter_by_fund": view.aaum_quarter,
+            "column_definitions": services.column_help(config, view),
             "notes": notes,
             "source": NAV_SOURCE,
             "as_of": max(view.nav_as_of.values()) if view.nav_as_of else None,

@@ -92,32 +92,6 @@ def _year_picker(key: str, label: str, default: int = services.DEFAULT_YEARS) ->
     )
 
 
-def _comparison_info(config: AppConfig, view: services.ComparisonView) -> str:
-    nav = services.as_of_text(view.nav_as_of)
-    if nav is None:
-        return "No NAV data yet. Run a refresh from the Data health tab."
-    y = view.years
-    period = "1 year" if y == 1 else f"{y} years"
-    td = services.as_of_text(view.td_as_of) or "no benchmark data yet"
-    lines = [
-        f"- **NAV** as of {nav}.",
-        f"- **P2P return** = point-to-point return over the last {period}: NAV on the as-of "
-        f"date vs NAV {period} earlier, annualised (CAGR). Direct plan, growth option, "
-        "net of expenses.",
-        f"- **Tracking diff** = fund P2P return minus {config.settings.benchmark_name} P2P "
-        f"return over the same {period}, as of {td}.",
-        f"- **Flag** = exit load above {config.settings.exit_load_flag_above_pct:g}%, or an "
-        "open data flag (see Data health).",
-    ]
-    if config.settings.ter_enabled and view.ter_as_of:
-        lines.append(f"- **TER** as of {services.as_of_text(view.ter_as_of)}.")
-    if config.settings.aaum_enabled and view.aaum_quarter:
-        lines.append(
-            f"- **AUM** = average AUM, quarter ending {services.as_of_text(view.aaum_quarter)}."
-        )
-    return "\n".join(lines)
-
-
 def fund_comparison_tab(config: AppConfig) -> None:
     left, right = st.columns([2, 1])
     with left:
@@ -130,21 +104,27 @@ def fund_comparison_tab(config: AppConfig) -> None:
     if table.empty:
         st.info("No funds in this category.")
         return
-    st.info(_comparison_info(config, view))
-    st.dataframe(
-        table,
-        hide_index=True,
-        width="stretch",
-        column_config={c: PCT for c in table.columns if "%" in c}
-        | {
-            "NAV": st.column_config.NumberColumn(format="%.4f"),
-            "AUM (Rs Cr)": st.column_config.NumberColumn(format="%,.0f"),
-            "Fund manager": st.column_config.TextColumn(width="large"),
-            "Flag": st.column_config.TextColumn(width="medium"),
-            "Factsheet": st.column_config.LinkColumn(display_text="Open"),
-            "Portfolio": st.column_config.LinkColumn(display_text="Open"),
-        },
-    )
+    if not view.nav_as_of:
+        st.info("No NAV data yet. Run a refresh from the Data health tab.")
+    st.caption("Hover over a column name for its definition and as-of date.")
+    help_text = services.column_help(config, view)
+    column_config = {
+        c: st.column_config.NumberColumn(format="%.2f", help=help_text.get(c))
+        for c in table.columns
+        if "%" in c
+    } | {
+        "NAV": st.column_config.NumberColumn(format="%.4f", help=help_text["NAV"]),
+        "AUM (Rs Cr)": st.column_config.NumberColumn(
+            format="%,.0f", help=help_text.get("AUM (Rs Cr)")
+        ),
+        "Fund manager": st.column_config.TextColumn(width="medium"),
+        "Factsheet": st.column_config.LinkColumn(display_text="Open", help=help_text["Factsheet"]),
+        "Monthly portfolio": st.column_config.LinkColumn(
+            display_text="Open", help=help_text["Monthly portfolio"]
+        ),
+        "Flag": st.column_config.TextColumn(width="medium", help=help_text["Flag"]),
+    }
+    st.dataframe(table, hide_index=True, width="stretch", column_config=column_config)
     _csv_button(table, f"fund_comparison_{category.lower()}_{years}y.csv", "cmp_csv")
 
 
