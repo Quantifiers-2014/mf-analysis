@@ -2,7 +2,6 @@
 
 python -m arbitrage_analyser refresh
 python -m arbitrage_analyser import-benchmark FILE.csv
-python -m arbitrage_analyser fetch-ter [--month MM-YYYY]
 python -m arbitrage_analyser import-ter FILE
 python -m arbitrage_analyser import-aaum FILE
 python -m arbitrage_analyser check-config
@@ -15,7 +14,6 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Sequence
-from datetime import date
 from pathlib import Path
 
 from arbitrage_analyser import db, ingest
@@ -40,7 +38,7 @@ _IMPORTERS: dict[str, ingest.FileImporter] = {
     "import-aaum": ingest.import_aaum,
 }
 # Importers that run only when switched on in [settings.features].
-_FEATURE_OF = {"fetch-ter": "ter", "import-ter": "ter", "import-aaum": "aaum"}
+_FEATURE_OF = {"import-ter": "ter", "import-aaum": "aaum"}
 
 
 def _report(result: ingest.LoadResult) -> int:
@@ -58,10 +56,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("refresh", help="download NAV history for all configured funds")
     commands.add_parser("check-config", help="validate config/funds.toml")
     commands.add_parser("app", help="open the app in your browser")
-    fetch_ter = commands.add_parser("fetch-ter", help="download one month of TER from AMFI")
-    fetch_ter.add_argument(
-        "--month", help="MM-YYYY (default: last month)", default=None, metavar="MM-YYYY"
-    )
     for name in _IMPORTERS:
         sub = commands.add_parser(name, help=f"{name.replace('-', ' ')} from a downloaded file")
         sub.add_argument("file", type=Path)
@@ -90,10 +84,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     with db.connect(db_path()) as conn:
         if args.command == "refresh":
             return _report(ingest.refresh_nav(conn, config))
-        if args.command == "fetch-ter":
-            month = args.month or ingest.previous_month(date.today())
-            print(f"Fetching TER for {month} from AMFI...")
-            return _report(ingest.fetch_ter(conn, config, month))
         try:
             content = args.file.read_bytes()
         except OSError as exc:

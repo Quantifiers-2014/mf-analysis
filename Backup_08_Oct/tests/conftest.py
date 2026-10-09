@@ -30,9 +30,6 @@ overlap_tolerance = 0.01
 ter = true
 aaum = true
 
-[settings.amfi_ter_category_ids]
-Arbitrage = 46
-
 [settings.freshness]
 nav = [4, 7]
 ter = [45, 60]
@@ -45,7 +42,6 @@ amc = "Alpha"
 category = "Arbitrage"
 amfi_code = 100001
 isin = "INF000A01AA1"
-amfi_mf_id = 17
 ter_match = "Alpha Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
@@ -57,7 +53,6 @@ amc = "Beta"
 category = "Arbitrage"
 amfi_code = 100002
 isin = "INF000B01BB2"
-amfi_mf_id = 22
 ter_match = "Beta Arbitrage Fund"
 exit_load_pct = 0.5
 exit_load_days = 15
@@ -134,53 +129,54 @@ def xlsx_bytes(rows: list[list[object]]) -> bytes:
     return buffer.getvalue()
 
 
-_TER_FIELDS = [
+TER_HEADER = [
+    "Scheme Name",
+    "Date (DD/MM/YYYY)",
     "Base Expense Ratio (BER) (%)",
     "Brokerage cost (%)",
     "Transaction Cost incurred for the purpose of execution of trade (%)",
     "Statutory Levies (including GST) (%)",
     "Total TER (%)",
 ]
-# Same header row as the AMFI TER Excel (Sep-2026 download).
-TER_HEADER = [
-    "NSDL Scheme Code",
-    "Scheme Name",
-    "Scheme Type",
-    "Scheme Category",
-    "TER Date",
-    *[f"Regular Plan - {f}" for f in _TER_FIELDS],
-    *[f"Direct Plan - {f}" for f in _TER_FIELDS],
-]
 
 
-def ter_rows(data: list[tuple[str, str, float | None, float | None]]) -> list[list[object]]:
-    """data: (scheme name, dd/mm/yyyy, direct BER, direct total). Regular plan = direct + 0.5.
-
-    Ends with a blank row and a disclaimer row, as in the AMFI file.
-    """
-    rows: list[list[object]] = [list(TER_HEADER)]
+def ter_rows(data: list[tuple[str, str, float, float]]) -> list[list[object]]:
+    """data: (scheme name, dd/mm/yyyy, direct base, direct total). Regular plan = direct + 0.5."""
+    group = [
+        None,
+        None,
+        "Regular Plan",
+        None,
+        None,
+        None,
+        None,
+        "Direct Plan",
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+    header = [*TER_HEADER, *TER_HEADER[2:], "NSDL_Number"]
+    rows: list[list[object]] = [group, header]
     for name, day, base, total in data:
-        regular = [None if v is None else v + 0.5 for v in (base, total)]
         rows.append(
             [
-                "X/O/H/ARB/1",
                 name,
-                "Open Ended",
-                "Hybrid Scheme - Arbitrage Fund",
                 day,
-                regular[0],
+                base + 0.5,
                 0.14,
                 0.09,
                 1.7,
-                regular[1],
+                total + 0.5,
                 base,
                 0.14,
                 0.09,
-                1.7,
+                round(total - base - 0.23, 4),
                 total,
+                "X/1",
             ]
         )
-    rows += [[None] * len(TER_HEADER), ["Disclaimer :", *[None] * (len(TER_HEADER) - 1)]]
     return rows
 
 

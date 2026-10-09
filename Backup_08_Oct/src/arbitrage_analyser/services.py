@@ -90,7 +90,7 @@ def fund_comparison(
             if code in aaum.index:
                 aaum_quarter[fund.name] = str(aaum.at[code, "quarter_end"])
         if settings.ter_enabled:
-            row["BER %"] = ter["base_ter"].get(code)
+            row["Base TER %"] = ter["base_ter"].get(code)
             row["Total TER %"] = ter["total_ter"].get(code)
             if code in ter.index:
                 ter_as_of[fund.name] = str(ter.at[code, "date"])

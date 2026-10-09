@@ -5,8 +5,6 @@
 #
 # amfi_code  : AMFI scheme code. Checked against the NAV source on every refresh.
 # isin       : ISIN of the direct growth plan. Must match the NAV source.
-# amfi_mf_id : AMFI fund house id (MF_ID in the TER page request; ids read from the page on
-#              08-Oct-2026). Optional; funds without it are skipped by fetch-ter.
 # ter_match  : text that identifies the fund's row in the AMFI TER file (case-insensitive).
 #              Used only when [settings.features] ter = true.
 # exit_load_pct / exit_load_days : 0 and 0 means no exit load.
@@ -29,13 +27,8 @@ overlap_tolerance = 0.01         # Benchmark re-upload must match stored values 
 
 # Switch optional datasets on or off. Off hides their columns, uploads, commands and freshness rows.
 [settings.features]
-ter = true     # BER and Total TER from the AMFI TER file (Direct Plan)
+ter = false    # TER breakdown from the AMFI TER file
 aaum = false   # Average AUM from the AMFI AAUM file
-
-# AMFI TER page "Sub Category" id per fund category, used by fetch-ter / "Fetch TER from AMFI".
-# Seen 08-Oct-2026 in the page's request when Sub Category = Arbitrage Fund (strCat=46).
-[settings.amfi_ter_category_ids]
-Arbitrage = 46
 
 # Freshness: days since the latest data date. Due after the first number, Overdue after the second.
 [settings.freshness]
@@ -50,7 +43,6 @@ amc = "Kotak"
 category = "Arbitrage"
 amfi_code = 119771
 isin = "INF174K01LC6"
-amfi_mf_id = 17
 ter_match = "Kotak Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 30
@@ -64,7 +56,6 @@ amc = "SBI"
 category = "Arbitrage"
 amfi_code = 119574
 isin = "INF200K01QU0"
-amfi_mf_id = 22
 ter_match = "SBI Arbitrage"
 exit_load_pct = 0.25
 exit_load_days = 15
@@ -80,7 +71,6 @@ amc = "ICICI Prudential"
 category = "Arbitrage"
 amfi_code = 120364
 isin = "INF109K016O4"
-amfi_mf_id = 20
 ter_match = "ICICI Prudential Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
@@ -93,7 +83,6 @@ amc = "Invesco"
 category = "Arbitrage"
 amfi_code = 120401
 isin = "INF205K01KR8"
-amfi_mf_id = 42
 ter_match = "Invesco India Arbitrage Fund"
 exit_load_pct = 0.50
 exit_load_days = 15
@@ -110,7 +99,6 @@ amc = "Aditya Birla Sun Life"
 category = "Arbitrage"
 amfi_code = 119526
 isin = "INF209K01VP1"
-amfi_mf_id = 3
 ter_match = "Aditya Birla Sun Life Arbitrage Fund"
 exit_load_pct = 0.0
 exit_load_days = 0
@@ -124,7 +112,6 @@ amc = "Tata"
 category = "Arbitrage"
 amfi_code = 145724
 isin = "INF277K017Q3"
-amfi_mf_id = 25
 ter_match = "Tata Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
@@ -138,7 +125,6 @@ amc = "Nippon India"
 category = "Arbitrage"
 amfi_code = 118585
 isin = "INF204K01XZ7"
-amfi_mf_id = 21
 ter_match = "Nippon India Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15
@@ -152,7 +138,6 @@ amc = "Edelweiss"
 category = "Arbitrage"
 amfi_code = 130206
 isin = "INF754K01EA4"
-amfi_mf_id = 47
 ter_match = "Edelweiss Arbitrage Fund"
 exit_load_pct = 0.25
 exit_load_days = 15

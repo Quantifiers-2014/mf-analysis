@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -47,7 +47,6 @@ class Fund:
     exit_load_pct: float
     exit_load_days: int
     fund_managers: tuple[FundManager, ...]
-    amfi_mf_id: int | None = None  # AMFI fund house id (MF_ID), used to fetch TER
 
 
 @dataclass(frozen=True)
@@ -71,8 +70,6 @@ class Settings:
     freshness: dict[str, Freshness]
     ter_enabled: bool
     aaum_enabled: bool
-    # Fund category -> AMFI TER page "Sub Category" id (strCat), used to fetch TER from AMFI.
-    amfi_ter_category_ids: dict[str, int] = field(default_factory=dict)
 
     def active_datasets(self) -> tuple[str, ...]:
         """Datasets in use. TER and AAUM can be switched off in [settings.features]."""
@@ -143,7 +140,6 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
         freshness=freshness,
         ter_enabled=_require(features, "ter", bool, f"{where}.features"),
         aaum_enabled=_require(features, "aaum", bool, f"{where}.features"),
-        amfi_ter_category_ids=_category_ids(raw.get("amfi_ter_category_ids", {}), where),
     )
     if settings.outlier_multiplier <= 0 or settings.outlier_lookback_days <= 0:
         raise ConfigError(f"{where}: outlier settings must be positive")
@@ -152,16 +148,6 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
     if settings.overlap_tolerance < 0:
         raise ConfigError(f"{where}: overlap_tolerance must not be negative")
     return settings
-
-
-def _category_ids(raw: object, where: str) -> dict[str, int]:
-    where = f"{where}.amfi_ter_category_ids"
-    if not isinstance(raw, dict):
-        raise ConfigError(f"{where} must be a table of category = id")
-    for category, value in raw.items():
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ConfigError(f"{where}: '{category}' must be a positive whole number")
-    return dict(raw)
 
 
 def _parse_manager(raw: object, where: str) -> FundManager:
@@ -204,7 +190,6 @@ def _parse_fund(raw: dict[str, Any], index: int) -> Fund:
         exit_load_pct=float(_require(raw, "exit_load_pct", (int, float), where)),
         exit_load_days=_require(raw, "exit_load_days", int, where),
         fund_managers=tuple(_parse_manager(m, where) for m in managers),
-        amfi_mf_id=_require(raw, "amfi_mf_id", int, where) if "amfi_mf_id" in raw else None,
     )
     for field_name in ("name", "amc", "category", "ter_match"):
         if not getattr(fund, field_name):
@@ -213,8 +198,6 @@ def _parse_fund(raw: dict[str, Any], index: int) -> Fund:
         raise ConfigError(f"{where}: isin '{fund.isin}' is not a mutual fund ISIN")
     if fund.amfi_code <= 0:
         raise ConfigError(f"{where}: amfi_code must be positive")
-    if fund.amfi_mf_id is not None and fund.amfi_mf_id <= 0:
-        raise ConfigError(f"{where}: amfi_mf_id must be positive")
     if fund.exit_load_pct < 0 or fund.exit_load_days < 0:
         raise ConfigError(f"{where}: exit load values must not be negative")
     if (fund.exit_load_pct == 0) != (fund.exit_load_days == 0):
