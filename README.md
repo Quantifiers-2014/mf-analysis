@@ -76,6 +76,51 @@ python -m arbitrage_analyser app
 Run it with the virtual environment active. It starts Streamlit with the same Python, so the
 app always finds this package.
 
+## Ask the analyst (AI agent, Phase 1)
+
+The **Ask the analyst** tab is a chat that answers questions about the funds in the database.
+An AI model uses read-only tools over the same data and calculations as the other screens, so
+every figure comes from the database, with its source and as-of date. It declines questions
+outside mutual funds, says when it is unsure or data is missing, and asks a clarifying question
+when one is needed.
+
+Setup (once):
+
+```bash
+pip install -e ".[agent]"
+copy .env.example .env          # macOS/Linux: cp .env.example .env
+```
+
+Put a Google Gemini API key (free from <https://aistudio.google.com/apikey>) in `.env` after
+`GEMINI_API_KEY=`, then restart the app. `.env` is git-ignored; never share it.
+
+- Model: Gemini `gemini-3.8-flash` by default. Change it with `ARBITRAGE_AGENT_MODEL`. To use
+  Claude, set `ARBITRAGE_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`; for Groq, OpenRouter
+  or Ollama use `openai_compatible` (see `.env.example`). The sidebar shows the model in use.
+- Free tiers allow only a few requests per minute and per day, and one question takes 2 to 4
+  requests. On the free tier Google may use prompts to improve its products, so do not type
+  confidential information into the chat.
+- Conversations are saved in `data/chat.db` (override with `ARBITRAGE_CHAT_DB`), under the name
+  in the sidebar, so you can reopen them later. Each answer is stored with the tool calls
+  behind it, model, tokens, time taken, Langfuse trace id and any thumbs up/down.
+- Langfuse tracing (optional): create a free account at <https://langfuse.com/cloud>, make a
+  project, and put its API keys in `.env` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and
+  `LANGFUSE_BASE_URL` for the US cloud or a self-hosted server). Traces follow Langfuse's best
+  practices (`agent/tracing.py`):
+  - one trace `answer-fund-question` per question (input: the question, output: the answer),
+    one session per conversation, with the user name, `LANGFUSE_TRACING_ENVIRONMENT`
+    (default `development`), prompt version and app version;
+  - inside it, a `generate-response` generation per model call (messages, model, tokens; for
+    Gemini via Langfuse's OpenAI integration) and a `tool` observation per tool call;
+  - errors marked on the trace and failed tool calls as warnings;
+  - thumbs up/down as the boolean score `response_rating`;
+  - emails, phone, PAN and Aadhaar numbers masked before anything is sent.
+  Names are used by Langfuse filters and evaluators, so rename them with care.
+- The instructions are in `src/arbitrage_analyser/agent/prompt.py`; bump `PROMPT_VERSION` when
+  you change them.
+- Limits for now: no web search or file uploads, the last 30 messages of a conversation are sent
+  with each question, and answers are text and tables only (no charts yet).
+
 ## Daily NAV refresh
 
 macOS/Linux (cron, 8:30 pm daily):
@@ -125,6 +170,8 @@ src/arbitrage_analyser/
   services.py              screen read models (reusable by a future API or chatbot)
   cli.py                   command line
   app.py                   Streamlit UI
+  chat_ui.py               "Ask the analyst" chat tab
+  agent/                   AI agent: tools, prompt, Claude loop, chat storage, Langfuse tracing
 tests/                     unit and app tests
 ```
 
