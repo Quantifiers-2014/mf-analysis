@@ -24,7 +24,7 @@ def db_path() -> Path:
 
 def load_env_file() -> None:
     """Load secrets (API keys) from the project's .env file, if present. Variables already set
-    in the environment win. Needs python-dotenv, installed with the [agent] extras."""
+    in the environment win. Needs python-dotenv (a project dependency)."""
     try:
         from dotenv import load_dotenv
     except ImportError:
