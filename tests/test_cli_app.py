@@ -92,15 +92,15 @@ def test_app_renders_all_tabs(env: Path, config_file: Path) -> None:
         "Beta Arbitrage Fund",
     ]
 
-    info = " ".join(i.value for i in app.info)
-    assert "point-to-point" in info and "as of" in info
+    assert any("Hover over a column name" in c.value for c in app.caption)
+    # definitions moved from the info box into column tooltips
+    assert not any("point-to-point" in i.value for i in app.info)
     assert app.radio(key="cmp_years").value == 3
     assert "P2P return % (3Y)" in app.dataframe[0].value.columns
     app.radio(key="cmp_years").set_value(1).run()
     assert not app.exception
     cols = list(app.dataframe[0].value.columns)
     assert "P2P return % (1Y)" in cols and "Tracking diff % (1Y)" in cols
-    assert "over the last 1 year:" in " ".join(i.value for i in app.info)
 
     app.radio(key="roll_window").set_value(5).run()
     assert not app.exception

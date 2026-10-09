@@ -158,12 +158,16 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
         "BER %",
         "Total TER %",
         "Exit load",
+        "Factsheet",
+        "Monthly portfolio",
         "Flag",
     ]
     table = view.table.set_index("Fund")
     alpha = table.loc["Alpha Arbitrage Fund"]
     assert alpha["NAV"] == pytest.approx(db.read_nav(conn, 100001).iloc[-1])
     assert alpha["Fund manager"] == "A. Manager (since 03-Oct-2019)"
+    assert alpha["Factsheet"] == "https://example.com/alpha/factsheets"
+    assert alpha["Monthly portfolio"] is None
     assert table.loc["Beta Arbitrage Fund", "Fund manager"] == (
         "B. Manager, C. Manager (since Dec 2014)"
     )
@@ -281,3 +285,28 @@ def test_open_ter_flag_marks_fund(conn: db.sqlite3.Connection, config: AppConfig
     assert ingest.import_ter(conn, config, content).ok
     table = services.fund_comparison(conn, config, "Arbitrage").table.set_index("Fund")
     assert table.loc["Alpha Arbitrage Fund", "Flag"] == "Open data flag"
+
+
+def test_column_help_carries_definitions_and_dates(
+    conn: db.sqlite3.Connection, config: AppConfig
+) -> None:
+    _load_all(conn, config)
+    view = services.fund_comparison(conn, config, "Arbitrage", 1)
+    help_text = services.column_help(config, view)
+    assert "as of 06-Oct-2026" in help_text["NAV"]
+    assert "last 1 year:" in help_text["P2P return % (1Y)"]
+    assert "annualised (CAGR)" in help_text["P2P return % (1Y)"]
+    assert "NIFTY 50 Arbitrage" in help_text["Tracking diff % (1Y)"]
+    assert "as of 30-Sep-2026" in help_text["Tracking diff % (1Y)"]
+    assert "exit load above 0.25%" in help_text["Flag"].lower()
+    assert "TER as of" in help_text["BER %"] and "TER as of" in help_text["Total TER %"]
+    assert "quarter ending 30-Sep-2026" in help_text["AUM (Rs Cr)"]
+    # every table column that needs a definition has one
+    assert {"NAV", "Factsheet", "Monthly portfolio", "Flag"} <= set(help_text)
+
+
+def test_column_help_without_data(conn: db.sqlite3.Connection, config: AppConfig) -> None:
+    help_text = services.column_help(config, services.fund_comparison(conn, config, "Arbitrage"))
+    assert "no NAV data yet" in help_text["NAV"]
+    assert "no benchmark data yet" in help_text["Tracking diff % (3Y)"]
+    assert "AUM (Rs Cr)" not in help_text

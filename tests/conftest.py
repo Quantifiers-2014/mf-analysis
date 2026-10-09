@@ -45,6 +45,7 @@ amc = "Alpha"
 category = "Arbitrage"
 amfi_code = 100001
 isin = "INF000A01AA1"
+factsheet_url = "https://example.com/alpha/factsheets"
 amfi_mf_id = 17
 ter_match = "Alpha Arbitrage Fund"
 exit_load_pct = 0.25

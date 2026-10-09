@@ -48,6 +48,8 @@ class Fund:
     exit_load_days: int
     fund_managers: tuple[FundManager, ...]
     amfi_mf_id: int | None = None  # AMFI fund house id (MF_ID), used to fetch TER
+    factsheet_url: str | None = None  # AMC page listing monthly factsheets
+    portfolio_url: str | None = None  # AMC page listing monthly portfolio disclosures
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,15 @@ def _category_ids(raw: object, where: str) -> dict[str, int]:
     return dict(raw)
 
 
+def _url(raw: dict[str, Any], key: str, where: str) -> str | None:
+    if key not in raw:
+        return None
+    url: str = _require(raw, key, str, where).strip()
+    if not url.startswith("https://") or " " in url:
+        raise ConfigError(f"{where}: {key} must be an https:// link")
+    return url
+
+
 def _parse_manager(raw: object, where: str) -> FundManager:
     """A manager is a plain name, or {name = "...", since = "YYYY-MM" or "YYYY-MM-DD"}."""
     if isinstance(raw, str):
@@ -205,6 +216,8 @@ def _parse_fund(raw: dict[str, Any], index: int) -> Fund:
         exit_load_days=_require(raw, "exit_load_days", int, where),
         fund_managers=tuple(_parse_manager(m, where) for m in managers),
         amfi_mf_id=_require(raw, "amfi_mf_id", int, where) if "amfi_mf_id" in raw else None,
+        factsheet_url=_url(raw, "factsheet_url", where),
+        portfolio_url=_url(raw, "portfolio_url", where),
     )
     for field_name in ("name", "amc", "category", "ter_match"):
         if not getattr(fund, field_name):

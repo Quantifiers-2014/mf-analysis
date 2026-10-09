@@ -17,7 +17,7 @@ from arbitrage_analyser.agent import agent, store, tools
 from arbitrage_analyser.agent.prompt import build_system_prompt
 from arbitrage_analyser.agent.providers import AnthropicProvider
 from arbitrage_analyser.config import AppConfig
-from tests.conftest import growth_series, history_for
+from tests.conftest import growth_series, history_for, ter_rows, xlsx_bytes
 from tests.test_cli_app import APP_PATH, env  # noqa: F401  (env is a fixture)
 
 # ---------- fakes ----------
@@ -276,3 +276,17 @@ def test_chat_tab_answers_and_saves_the_conversation(
     assert [m.content for m in messages] == ["Who leads on 3Y?", "Alpha leads."]
     assert messages[1].tool_calls[0]["name"] == "compare_funds"
     assert any("Alpha leads." in m.value for m in app.markdown)
+
+
+def test_compare_funds_gives_ter_date_and_definitions(
+    seeded: db.sqlite3.Connection, config: AppConfig
+) -> None:
+    content = xlsx_bytes(ter_rows([("Alpha Arbitrage Fund", "30/09/2026", 0.33, 2.32)]))
+    assert ingest.import_ter(seeded, config, content).ok
+    result, is_error = tools.run_tool(seeded, config, "compare_funds", {"category": "Arbitrage"})
+    assert not is_error
+    assert result["ter_as_of_by_fund"] == {"Alpha Arbitrage Fund": "2026-09-30"}
+    alpha = next(r for r in result["rows"] if r["Fund"] == "Alpha Arbitrage Fund")
+    assert alpha["BER %"] == pytest.approx(0.33)
+    assert "TER as of 30-Sep-2026" in result["column_definitions"]["BER %"]
+    assert any("ter_as_of_by_fund" in n for n in result["notes"])

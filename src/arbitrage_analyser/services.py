@@ -95,9 +95,48 @@ def fund_comparison(
             if code in ter.index:
                 ter_as_of[fund.name] = str(ter.at[code, "date"])
         row["Exit load"] = _exit_load_text(fund)
+        row["Factsheet"] = fund.factsheet_url
+        row["Monthly portfolio"] = fund.portfolio_url
         row["Flag"] = "; ".join(reasons)
         rows.append(row)
     return ComparisonView(pd.DataFrame(rows), years, nav_as_of, td_as_of, ter_as_of, aaum_quarter)
+
+
+def column_help(config: AppConfig, view: ComparisonView) -> dict[str, str]:
+    """Definition and as-of date per Fund comparison column (tooltips in the app; the agent
+    passes them on so its answers use the same definitions)."""
+    y = view.years
+    period = "1 year" if y == 1 else f"{y} years"
+    nav = as_of_text(view.nav_as_of) or "no NAV data yet"
+    td = as_of_text(view.td_as_of) or "no benchmark data yet"
+    ter = as_of_text(view.ter_as_of) or "no TER data yet"
+    help_text = {
+        "NAV": f"Direct Plan - Growth NAV, as of {nav}.",
+        return_column(y): (
+            f"Point-to-point return over the last {period}: NAV on the as-of date vs NAV "
+            f"{period} earlier, annualised (CAGR). Direct plan, growth option, net of expenses. "
+            f"NAV as of {nav}."
+        ),
+        td_column(y): (
+            f"Fund P2P return minus {config.settings.benchmark_name} P2P return over the same "
+            f"{period}, as of {td}."
+        ),
+        "BER %": f"Base Expense Ratio, Direct Plan, from AMFI. TER as of {ter}.",
+        "Total TER %": (
+            "Total expense ratio, Direct Plan: BER + brokerage + transaction cost + statutory "
+            f"levies (incl. GST), from AMFI. TER as of {ter}."
+        ),
+        "Factsheet": "AMC page listing the monthly factsheets.",
+        "Monthly portfolio": "AMC page listing the monthly portfolio disclosures.",
+        "Flag": (
+            f"Exit load above {config.settings.exit_load_flag_above_pct:g}%, or an open data "
+            "flag (see Data health)."
+        ),
+    }
+    if view.aaum_quarter:
+        quarter = as_of_text(view.aaum_quarter)
+        help_text["AUM (Rs Cr)"] = f"Average AUM for the quarter ending {quarter}."
+    return help_text
 
 
 def as_of_text(dates: Mapping[str, object]) -> str | None:
