@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "arbitrage-analyser"
 version = "0.1.0"
 description = "Internal tool to compare Indian arbitrage mutual funds on returns, costs and size."
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"  # upper bound needed: Streamlit Cloud installs with Poetry, and langfuse supports <4.0
 dependencies = [
     "pandas>=2.2",
     "streamlit>=1.50",
