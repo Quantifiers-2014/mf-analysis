@@ -89,9 +89,12 @@ def answer(
     with tracing.turn(user_id, conversation_id, question, PROMPT_VERSION) as trace:
         result.trace_id = trace.trace_id
         for _ in range(MAX_STEPS):
-            with trace.generation(model, messages) as gen:
+            if provider.auto_traced:  # a Langfuse integration records this call itself
                 step = provider.call(system, messages)
-                gen.record(step.log_output, step.input_tokens, step.output_tokens)
+            else:
+                with trace.generation(model, provider.log_messages(system, messages)) as gen:
+                    step = provider.call(system, messages)
+                    gen.record(step.log_output, step.input_tokens, step.output_tokens)
             result.input_tokens += step.input_tokens
             result.output_tokens += step.output_tokens
             messages.append(step.assistant_message)
@@ -126,7 +129,12 @@ def answer(
                 "model": model,
                 "prompt_version": PROMPT_VERSION,
                 "tool_calls": [c["name"] for c in result.tool_calls],
+                "tool_errors": sum(1 for c in result.tool_calls if c["is_error"]),
                 "stopped_early": result.stopped_early,
+                "history_messages": len(conversation) - 1,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "latency_ms": result.latency_ms,
             },
         )
     return result

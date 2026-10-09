@@ -17,6 +17,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from arbitrage_analyser.agent import tracing
+
 PROVIDER_ENV = "ARBITRAGE_AGENT_PROVIDER"
 MODEL_ENV = "ARBITRAGE_AGENT_MODEL"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
@@ -68,6 +70,12 @@ class Step:
 class Provider(Protocol):
     info: ProviderInfo
     model: str
+    # True when a Langfuse integration records each model call itself (no manual generation).
+    auto_traced: bool
+
+    def log_messages(self, system: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The request as OpenAI-format messages, for a manually recorded Langfuse generation."""
+        ...
 
     def first_messages(self, system: str) -> list[dict[str, Any]]: ...
 
@@ -121,11 +129,16 @@ def make_provider() -> Provider:
         import anthropic
 
         return AnthropicProvider(anthropic.Anthropic(), model)
-    import openai
-
     base_url = GEMINI_BASE_URL if info.name == "gemini" else os.environ["OPENAI_COMPAT_BASE_URL"]
-    client = openai.OpenAI(api_key=os.environ[info.key_env], base_url=base_url)
-    return OpenAICompatProvider(client, model, info)
+    traced = tracing.client() is not None  # set up Langfuse (with masking) before the client
+    if traced:
+        # Langfuse's OpenAI integration: records every call as a generation with the model,
+        # messages, tool calls and token usage, nested under the current trace.
+        from langfuse.openai import OpenAI
+    else:
+        from openai import OpenAI
+    client = OpenAI(api_key=os.environ[info.key_env], base_url=base_url)
+    return OpenAICompatProvider(client, model, info, traced=traced)
 
 
 # ---------- Claude ----------
@@ -133,6 +146,7 @@ def make_provider() -> Provider:
 
 class AnthropicProvider:
     max_tokens = 4096
+    auto_traced = False  # no Langfuse integration used: the agent records generations itself
 
     def __init__(self, client: Any, model: str, tools: list[dict[str, Any]] | None = None) -> None:
         from arbitrage_analyser.agent.tools import TOOL_SPECS
@@ -175,8 +189,30 @@ class AnthropicProvider:
             input_tokens=int((getattr(usage, "input_tokens", 0) or 0) + cached),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
             assistant_message={"role": "assistant", "content": blocks},
-            log_output=blocks,
+            log_output=_openai_assistant(blocks),
         )
+
+    def log_messages(self, system: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = [{"role": "system", "content": system}]
+        for message in messages:
+            content = message["content"]
+            if isinstance(content, str):
+                out.append({"role": message["role"], "content": content})
+            elif message["role"] == "assistant":
+                out.append(_openai_assistant(content))
+            else:  # a user turn carrying tool results
+                for block in content:
+                    if block.get("type") == "tool_result":
+                        out.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": block["tool_use_id"],
+                                "content": block["content"],
+                            }
+                        )
+                    elif block.get("type") == "text":
+                        out.append({"role": "user", "content": block["text"]})
+        return out
 
     def tool_results(
         self, results: list[tuple[ToolCall, dict[str, Any], bool]]
@@ -195,6 +231,25 @@ class AnthropicProvider:
                 ],
             }
         ]
+
+
+def _openai_assistant(blocks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Claude content blocks as one OpenAI-format assistant message (tool calls as
+    `tool_calls` with JSON-string arguments, which Langfuse renders as tool-call cards)."""
+    text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
+    message: dict[str, Any] = {"role": "assistant", "content": text or None}
+    calls = [
+        {
+            "id": b["id"],
+            "type": "function",
+            "function": {"name": b["name"], "arguments": json.dumps(b["input"])},
+        }
+        for b in blocks
+        if b.get("type") == "tool_use"
+    ]
+    if calls:
+        message["tool_calls"] = calls
+    return message
 
 
 # ---------- Gemini and other OpenAI-compatible APIs ----------
@@ -240,6 +295,8 @@ class OpenAICompatProvider:
         model: str,
         info: ProviderInfo | None = None,
         tools: list[dict[str, Any]] | None = None,
+        *,
+        traced: bool = False,
     ) -> None:
         from arbitrage_analyser.agent.tools import TOOL_SPECS
 
@@ -247,13 +304,20 @@ class OpenAICompatProvider:
         self.client = client
         self.model = model
         self.tools = openai_tools(tools if tools is not None else TOOL_SPECS)
+        self.auto_traced = traced  # client is Langfuse's OpenAI integration
 
     def first_messages(self, system: str) -> list[dict[str, Any]]:
         return [{"role": "system", "content": system}]
 
+    def log_messages(self, system: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return messages  # already OpenAI format (system message included)
+
     def call(self, system: str, messages: list[dict[str, Any]]) -> Step:
+        extra: dict[str, Any] = {}
+        if self.auto_traced:
+            extra["name"] = tracing.GENERATION_NAME  # the integration's observation name
         response = self.client.chat.completions.create(
-            model=self.model, messages=messages, tools=self.tools
+            model=self.model, messages=messages, tools=self.tools, **extra
         )
         choice = response.choices[0]
         message = choice.message

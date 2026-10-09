@@ -59,7 +59,9 @@ def chat_sidebar() -> None:
         model = os.environ.get(providers.MODEL_ENV) or (info.default_model if info else "")
         st.caption(f"Model: {info.label} · {model}" if info else "Model: not set up")
         st.caption(
-            "Langfuse tracing: on" if tracing.enabled() else "Langfuse tracing: off (no keys set)"
+            f"Langfuse tracing: on ({tracing.environment()})"
+            if tracing.enabled()
+            else "Langfuse tracing: off (no keys set)"
         )
 
 

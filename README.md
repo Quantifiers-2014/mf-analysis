@@ -93,10 +93,19 @@ Put a Google Gemini API key (free from <https://aistudio.google.com/apikey>) in 
 - Conversations are saved in `data/chat.db` (override with `ARBITRAGE_CHAT_DB`), under the name
   in the sidebar, so you can reopen them later. Each answer is stored with the tool calls
   behind it, model, tokens, time taken, Langfuse trace id and any thumbs up/down.
-- Langfuse tracing: fill in `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (and
-  `LANGFUSE_BASE_URL` if not on Langfuse's EU cloud). Each question is one trace
-  (session = conversation) showing every model call and tool call; thumbs up/down are sent as a
-  `user_feedback` score.
+- Langfuse tracing (optional): create a free account at <https://langfuse.com/cloud>, make a
+  project, and put its API keys in `.env` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and
+  `LANGFUSE_BASE_URL` for the US cloud or a self-hosted server). Traces follow Langfuse's best
+  practices (`agent/tracing.py`):
+  - one trace `answer-fund-question` per question (input: the question, output: the answer),
+    one session per conversation, with the user name, `LANGFUSE_TRACING_ENVIRONMENT`
+    (default `development`), prompt version and app version;
+  - inside it, a `generate-response` generation per model call (messages, model, tokens; for
+    Gemini via Langfuse's OpenAI integration) and a `tool` observation per tool call;
+  - errors marked on the trace and failed tool calls as warnings;
+  - thumbs up/down as the boolean score `response_rating`;
+  - emails, phone, PAN and Aadhaar numbers masked before anything is sent.
+  Names are used by Langfuse filters and evaluators, so rename them with care.
 - The instructions are in `src/arbitrage_analyser/agent/prompt.py`; bump `PROMPT_VERSION` when
   you change them.
 - Limits for now: no web search or file uploads, the last 30 messages of a conversation are sent
