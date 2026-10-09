@@ -13,10 +13,10 @@ from tests.conftest import CONFIG_TEXT, CONFIG_TEXT_OFF
 from tests.test_cli_app import APP_PATH
 
 
-def test_shipped_config_has_ter_on_and_aaum_off() -> None:
+def test_shipped_config_has_ter_and_aaum_off() -> None:
     settings = load_config().settings
-    assert (settings.ter_enabled, settings.aaum_enabled) == (True, False)
-    assert settings.active_datasets() == ("nav", "ter", "benchmark")
+    assert (settings.ter_enabled, settings.aaum_enabled) == (False, False)
+    assert settings.active_datasets() == ("nav", "benchmark")
 
 
 def test_active_datasets(config_file: Path, config_file_off: Path) -> None:

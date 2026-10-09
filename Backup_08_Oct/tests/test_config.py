@@ -18,8 +18,6 @@ def test_shipped_config_is_valid() -> None:
     assert len(config.funds) == 8
     assert config.categories() == ["Arbitrage"]
     assert all(f.isin.startswith("INF") for f in config.funds)
-    # every fund can be fetched from AMFI's TER page, one distinct fund house id each
-    assert len({f.amfi_mf_id for f in config.funds if f.amfi_mf_id}) == len(config.funds)
 
 
 def test_fixture_config_loads(config_file: Path) -> None:

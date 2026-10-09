@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import pandas as pd
 import pytest
 import requests
 
-from arbitrage_analyser.config import DEFAULT_CONFIG_PATH, AppConfig, load_config
+from arbitrage_analyser.config import AppConfig
 from arbitrage_analyser.sources import SourceError
 from arbitrage_analyser.sources.aaum import parse_aaum
 from arbitrage_analyser.sources.benchmark import parse_benchmark_csv
@@ -194,47 +192,9 @@ def test_parse_ter_reports_unmatched_and_ambiguous(config: AppConfig) -> None:
         parse_ter(ambiguous, config.funds)
 
 
-def test_parse_ter_skips_blank_values(config: AppConfig) -> None:
-    content = xlsx_bytes(
-        ter_rows(
-            [
-                ("Alpha Arbitrage Fund", "03/10/2026", 0.33, 2.30),
-                ("Alpha Arbitrage Fund", "04/10/2026", None, None),
-                ("Beta Arbitrage Fund", "04/10/2026", 0.34, None),
-            ]
-        )
-    )
-    parsed = parse_ter(content, config.funds)
-    assert list(parsed.rows["date"]) == [pd.Timestamp("2026-10-03")]
-    assert parsed.blank_rows == [
-        "Alpha Arbitrage Fund (1 day(s))",
-        "Beta Arbitrage Fund (1 day(s))",
-    ]
-    assert parsed.unmatched_funds == []
-
-
-def test_parse_real_amfi_file() -> None:
-    """The AMFI download for Kotak, Sep-2026: 30 daily rows, then disclaimer rows."""
-    content = (Path(__file__).parent / "data" / "amfi_ter_kotak_2026-09.xlsx").read_bytes()
-    config = load_config(DEFAULT_CONFIG_PATH)
-    parsed = parse_ter(content, config.funds)
-    assert len(parsed.unmatched_funds) == len(config.funds) - 1
-    rows = parsed.rows.set_index("date")
-    assert len(rows) == 30
-    assert set(rows["amfi_code"]) == {119771}
-    first, last = rows.loc[pd.Timestamp("2026-09-01")], rows.loc[pd.Timestamp("2026-09-30")]
-    assert first["base_ter"] == pytest.approx(0.34)
-    assert first["total_ter"] == pytest.approx(2.3282)
-    assert last["base_ter"] == pytest.approx(0.33)
-    assert last["brokerage"] == pytest.approx(0.1435)
-    assert last["transaction_cost"] == pytest.approx(0.0847)
-    assert last["statutory_levies"] == pytest.approx(1.76)
-    assert last["total_ter"] == pytest.approx(2.3182)
-
-
 def test_parse_ter_layout_errors(config: AppConfig) -> None:
     no_direct = ter_rows([("Alpha Arbitrage Fund", "04/10/2026", 0.33, 2.32)])
-    no_direct[0] = [str(h).replace("Direct Plan - ", "") for h in no_direct[0]]
+    no_direct[0] = [None] * len(no_direct[0])
     with pytest.raises(SourceError, match="Direct Plan"):
         parse_ter(xlsx_bytes(no_direct), config.funds)
     with pytest.raises(SourceError, match="scheme name"):

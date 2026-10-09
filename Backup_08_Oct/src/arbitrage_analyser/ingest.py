@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
-from typing import Any
 
 import pandas as pd
 
@@ -15,10 +12,9 @@ from arbitrage_analyser import db
 from arbitrage_analyser.config import AppConfig
 from arbitrage_analyser.sources import SourceError
 from arbitrage_analyser.sources.aaum import parse_aaum
-from arbitrage_analyser.sources.amfi_ter_api import fetch_ter_records
 from arbitrage_analyser.sources.benchmark import parse_benchmark_csv
 from arbitrage_analyser.sources.mfapi import SchemeHistory, fetch_history
-from arbitrage_analyser.sources.ter import TerImport, parse_ter, parse_ter_records
+from arbitrage_analyser.sources.ter import parse_ter
 from arbitrage_analyser.validation import (
     check_benchmark_upload,
     check_duplicate_dates,
@@ -135,92 +131,18 @@ def import_benchmark(conn: sqlite3.Connection, config: AppConfig, content: bytes
 
 
 def import_ter(conn: sqlite3.Connection, config: AppConfig, content: bytes) -> LoadResult:
-    """Import the AMFI TER Excel download."""
+    result = LoadResult()
     try:
         parsed = parse_ter(content, config.funds)
     except SourceError as exc:
-        return LoadResult(errors=[str(exc)])
-    return _store_ter(conn, [parsed], "in the file")
-
-
-TerFetcher = Callable[[str, int, int], list[dict[str, Any]]]  # month, category id, MF_ID
-_MONTH = re.compile(r"(0[1-9]|1[0-2])-\d{4}")
-
-
-def previous_month(today: date) -> str:
-    """MM-YYYY of the month before `today`: the latest month with a full set of daily TER rows."""
-    first = today.replace(day=1)
-    last_month = first - timedelta(days=1)
-    return last_month.strftime("%m-%Y")
-
-
-def fetch_ter(
-    conn: sqlite3.Connection,
-    config: AppConfig,
-    month: str,
-    fetch: TerFetcher | None = None,
-) -> LoadResult:
-    """Download one month (MM-YYYY) of TER from AMFI and store it.
-
-    AMFI returns one fund house per request, so there is one request per category and
-    amfi_mf_id. A failed request is reported; the other fund houses still load.
-    `fetch(month, category_id, mf_id)` defaults to AMFI's page request; tests pass a fake.
-    """
-    if not _MONTH.fullmatch(month):
-        return LoadResult(errors=[f"Month must be MM-YYYY, got '{month}'"])
-    fetch = fetch or (lambda m, c, f: fetch_ter_records(m, c, f))
-    category_ids = config.settings.amfi_ter_category_ids
-    parsed: list[TerImport] = []
-    errors: list[str] = []
-    no_mf_id = [f.name for f in config.funds if f.amfi_mf_id is None]
-    for category in config.categories():
-        funds = [f for f in config.funds_in(category) if f.amfi_mf_id is not None]
-        if not funds:
-            continue
-        if category not in category_ids:
-            errors.append(
-                f"No AMFI TER category id for '{category}'. Add it under "
-                "[settings.amfi_ter_category_ids] in config/funds.toml."
-            )
-            continue
-        for mf_id in sorted({f.amfi_mf_id for f in funds if f.amfi_mf_id is not None}):
-            house = [f for f in funds if f.amfi_mf_id == mf_id]
-            try:
-                records = fetch(month, category_ids[category], mf_id)
-                parsed.append(parse_ter_records(records, house))
-            except SourceError as exc:
-                errors.append(f"{', '.join(f.name for f in house)}: {exc}")
-
-    if parsed:
-        result = _store_ter(conn, parsed, f"for {month}")
-    else:
-        result = LoadResult()
-        if not errors:
-            errors.append("No fund has an amfi_mf_id in config/funds.toml")
-    result.errors += errors
-    if no_mf_id:
-        result.notes.append("Not fetched (no amfi_mf_id in config): " + ", ".join(no_mf_id))
-    if errors:
-        result.notes.append(
-            "For failed funds, download the Excel from the AMFI page and import it."
-        )
-    return result
-
-
-def _store_ter(conn: sqlite3.Connection, parsed: list[TerImport], source: str) -> LoadResult:
-    """Validate and store parsed TER rows. `source` names the data in messages."""
-    result = LoadResult()
-    rows = pd.concat([p.rows for p in parsed], ignore_index=True)
-    unmatched = [name for p in parsed for name in p.unmatched_funds]
-    blank = [name for p in parsed for name in p.blank_rows]
-    if rows.empty:
-        result.errors.append(f"No TER values {source} for any configured fund")
-        result.notes += _ter_notes(unmatched, blank)
+        result.errors.append(str(exc))
+        return result
+    if parsed.rows.empty:
+        result.errors.append("The file has no rows for any configured fund")
         return result
 
     flags: list[db.Flag] = []
-    for row in rows.itertuples(index=False):
-        day = row.date.date().isoformat()
+    for row in parsed.rows.itertuples(index=False):
         for column in ("base_ter", "total_ter"):
             value = getattr(row, column)
             if not 0 <= value <= 5:
@@ -228,7 +150,7 @@ def _store_ter(conn: sqlite3.Connection, parsed: list[TerImport], source: str) -
                     db.Flag(
                         "ter",
                         str(row.amfi_code),
-                        day,
+                        row.date.date().isoformat(),
                         f"{column}_range",
                         f"{column} {value}% is outside 0-5%; check the units",
                     )
@@ -236,23 +158,19 @@ def _store_ter(conn: sqlite3.Connection, parsed: list[TerImport], source: str) -
         if row.total_ter < row.base_ter:
             flags.append(
                 db.Flag(
-                    "ter", str(row.amfi_code), day, "total_below_base", "Total TER is below BER"
+                    "ter",
+                    str(row.amfi_code),
+                    row.date.date().isoformat(),
+                    "total_below_base",
+                    "Total TER is below Base TER",
                 )
             )
-    result.rows = db.upsert_ter(conn, rows)
+    result.rows = db.upsert_ter(conn, parsed.rows)
     result.new_flags = db.record_flags(conn, flags)
-    result.notes += _ter_notes(unmatched, blank)
+    if parsed.unmatched_funds:
+        result.notes.append("No rows found for: " + ", ".join(parsed.unmatched_funds))
     db.log_refresh(conn, "ter", result.rows)
     return result
-
-
-def _ter_notes(unmatched: list[str], blank: list[str]) -> list[str]:
-    notes = []
-    if unmatched:
-        notes.append("No rows found for: " + ", ".join(unmatched))
-    if blank:
-        notes.append("Skipped rows with blank BER or Total TER: " + ", ".join(blank))
-    return notes
 
 
 def import_aaum(conn: sqlite3.Connection, config: AppConfig, content: bytes) -> LoadResult:

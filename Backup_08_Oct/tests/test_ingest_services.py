@@ -132,7 +132,7 @@ def test_import_errors_are_reported(conn: db.sqlite3.Connection, config: AppConf
     )
     assert not ingest.import_ter(conn, config, b"").ok
     no_match = xlsx_bytes(ter_rows([("Gamma Fund", "04/10/2026", 0.1, 0.2)]))
-    assert "No TER values in the file" in ingest.import_ter(conn, config, no_match).errors[0]
+    assert "no rows" in ingest.import_ter(conn, config, no_match).errors[0]
     assert not ingest.import_aaum(conn, config, xlsx_bytes(aaum_rows([(5, "x", 1.0)]))).ok
 
 
@@ -155,7 +155,7 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
         "P2P return % (3Y)",
         "Tracking diff % (3Y)",
         "AUM (Rs Cr)",
-        "BER %",
+        "Base TER %",
         "Total TER %",
         "Exit load",
         "Flag",
@@ -168,7 +168,7 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
         "B. Manager, C. Manager (since Dec 2014)"
     )
     assert alpha["AUM (Rs Cr)"] == pytest.approx(75712.34)
-    assert alpha["BER %"] == pytest.approx(0.33)
+    assert alpha["Base TER %"] == pytest.approx(0.33)
     assert alpha["Total TER %"] == pytest.approx(2.32)
     assert alpha["Exit load"] == "0.25% within 15 days"
     assert alpha["P2P return % (3Y)"] == pytest.approx(7.2, abs=0.05)

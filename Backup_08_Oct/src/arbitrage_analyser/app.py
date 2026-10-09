@@ -1,4 +1,4 @@
-"""Streamlit UI: Fund comparison, Rolling returns, Data health, Ask the analyst (chat).
+"""Streamlit UI: Fund comparison, Rolling returns, Data health.
 
 Run:  python -m arbitrage_analyser app
 """
@@ -20,9 +20,9 @@ import altair as alt  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from arbitrage_analyser import chat_ui, db, ingest, metrics, services  # noqa: E402
+from arbitrage_analyser import db, ingest, metrics, services  # noqa: E402
 from arbitrage_analyser.config import AppConfig, ConfigError, load_config  # noqa: E402
-from arbitrage_analyser.runtime import config_path, db_path, load_env_file  # noqa: E402
+from arbitrage_analyser.runtime import config_path, db_path  # noqa: E402
 
 MAX_FUNDS = 8
 PCT = st.column_config.NumberColumn(format="%.2f")
@@ -235,24 +235,6 @@ def _upload_section(
         _finish_load(f"Import {label.lower()}", result)
 
 
-def _fetch_ter_section(config: AppConfig) -> None:
-    st.markdown("**TER from AMFI**")
-    st.caption(
-        "Downloads the Direct Plan BER and Total TER for one month from the AMFI TER page. "
-        "This uses the page's own data request, not a published API, so it can stop working "
-        "if AMFI changes the page; upload the Excel below if it does."
-    )
-    left, right = st.columns([1, 3])
-    month = left.text_input(
-        "Month (MM-YYYY)", value=ingest.previous_month(date.today()), key="ter_month"
-    )
-    right.write("")  # aligns the button with the input box
-    if right.button("Fetch TER from AMFI", key="ter_fetch"):
-        with st.spinner(f"Downloading TER for {month}..."), db.connect(db_path()) as conn:
-            result = ingest.fetch_ter(conn, config, month.strip())
-        _finish_load(f"Fetch TER for {month.strip()}", result)
-
-
 def data_health_tab(config: AppConfig) -> None:
     with db.connect(db_path()) as conn:
         health = services.data_health(conn, config, date.today())
@@ -290,12 +272,10 @@ def data_health_tab(config: AppConfig) -> None:
         "up_bench",
     )
     if config.settings.ter_enabled:
-        _fetch_ter_section(config)
         _upload_section(
             config,
             "TER file",
-            "If the fetch fails: amfiindia.com/ter-of-mf-schemes > month, Category 'Hybrid "
-            "Scheme', Sub Category 'Arbitrage Fund' > GO > Download Excel.",
+            "AMFI > Research & Information > TER of MF Schemes, export the month.",
             ["xlsx", "xls", "csv", "html"],
             ingest.import_ter,
             "up_ter",
@@ -314,25 +294,19 @@ def data_health_tab(config: AppConfig) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Arbitrage Fund Analyser", layout="wide")
-    load_env_file()
     st.title("Arbitrage Fund Analyser")
     try:
         config = load_config(config_path())
     except ConfigError as exc:
         st.error(f"Config error: {exc}")
         st.stop()
-    chat_ui.chat_sidebar()
-    compare, rolling, health, chat = st.tabs(
-        ["Fund comparison", "Rolling returns", "Data health", "Ask the analyst"]
-    )
+    compare, rolling, health = st.tabs(["Fund comparison", "Rolling returns", "Data health"])
     with compare:
         fund_comparison_tab(config)
     with rolling:
         rolling_returns_tab(config)
     with health:
         data_health_tab(config)
-    with chat:
-        chat_ui.chat_tab(config)
 
 
 main()
