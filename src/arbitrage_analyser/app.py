@@ -16,28 +16,15 @@ _SRC = str(Path(__file__).resolve().parents[1])
 if sys.path[0] != _SRC:
     sys.path.insert(0, _SRC)
 
-import altair as alt  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from arbitrage_analyser import chat_ui, db, ingest, metrics, services  # noqa: E402
+from arbitrage_analyser import charts, chat_ui, db, ingest, metrics, services  # noqa: E402
 from arbitrage_analyser.config import AppConfig, ConfigError, load_config  # noqa: E402
 from arbitrage_analyser.runtime import config_path, db_path, load_env_file  # noqa: E402
 
-MAX_FUNDS = 8
+MAX_FUNDS = len(charts.FUND_COLOURS)
 PCT = st.column_config.NumberColumn(format="%.2f")
-# Tableau 10, one colour per selectable fund (MAX_FUNDS); grey is kept for the benchmark.
-FUND_COLOURS = [
-    "#4e79a7",
-    "#f28e2b",
-    "#e15759",
-    "#76b7b2",
-    "#59a14f",
-    "#edc948",
-    "#b07aa1",
-    "#ff9da7",
-]
-BENCHMARK_COLOUR = "#555555"
 
 
 def _category_picker(config: AppConfig, key: str) -> str:
@@ -128,11 +115,31 @@ def fund_comparison_tab(config: AppConfig) -> None:
     _csv_button(table, f"fund_comparison_{category.lower()}_{years}y.csv", "cmp_csv")
 
 
+START_KEY = "roll_start"
+
+
+def _start_date_picker(first: date, last: date) -> date:
+    """Start of the analysis. Defaults to the first NAV date; kept within the data's range."""
+    current = st.session_state.get(START_KEY)
+    if not isinstance(current, date) or not first <= current <= last:
+        st.session_state[START_KEY] = first
+    picked = st.date_input(
+        "Start date",
+        min_value=first,
+        max_value=last,
+        format="DD/MM/YYYY",
+        key=START_KEY,
+        help=f"Only rolling windows that begin on or after this date. Earliest NAV: "
+        f"{first:%d-%b-%Y}.",
+    )
+    return picked if isinstance(picked, date) else first
+
+
 def rolling_returns_tab(config: AppConfig) -> None:
     category = _category_picker(config, "roll_category")
     funds = config.funds_in(category)
     names = {f.name: f.amfi_code for f in funds}
-    col1, col2, col3 = st.columns([3, 1, 1])
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         chosen = st.multiselect(
             "Funds",
@@ -148,48 +155,29 @@ def rolling_returns_tab(config: AppConfig) -> None:
     if not chosen:
         st.info("Pick at least one fund.")
         return
+    codes = [names[n] for n in chosen]
 
     with db.connect(db_path()) as conn:
-        chart_data, stats = services.rolling_view(
-            conn, config, [names[n] for n in chosen], years, level
-        )
+        first = services.nav_start(conn, codes)
+        if first is None:
+            st.info("No NAV data yet. Run a refresh from the Data health tab.")
+            return
+        with col4:
+            start = _start_date_picker(first, date.today())
+        chart_data, stats = services.rolling_view(conn, config, codes, years, level, start)
     if chart_data.empty:
-        st.info(f"Not enough history for {years}Y windows yet.")
+        st.info(f"Not enough history for {years}Y windows starting on or after {start:%d-%b-%Y}.")
         return
 
-    # Funds get distinct colours in selection order; the benchmark is always dark grey.
-    fund_series = [n for n in chosen if n in set(chart_data["series"])]
-    has_benchmark = bool(chart_data["is_benchmark"].any())
-    domain = fund_series + ([services.BENCHMARK_LABEL] if has_benchmark else [])
-    colours = FUND_COLOURS[: len(fund_series)] + ([BENCHMARK_COLOUR] if has_benchmark else [])
-
-    chart = (
-        alt.Chart(chart_data)
-        .mark_line(strokeWidth=1.5)
-        .encode(
-            x=alt.X("date:T", title=None),
-            y=alt.Y(
-                "return_pct:Q", title=f"Rolling {years}Y return (%)", scale=alt.Scale(zero=False)
-            ),
-            color=alt.Color("series:N", title=None, scale=alt.Scale(domain=domain, range=colours)),
-            strokeDash=alt.StrokeDash(
-                "is_benchmark:N",
-                legend=None,
-                scale=alt.Scale(domain=[False, True], range=[[1, 0], [5, 4]]),
-            ),
-            tooltip=[
-                alt.Tooltip("date:T", format="%d-%b-%Y"),
-                "series:N",
-                alt.Tooltip("return_pct:Q", title="Return %", format=".2f"),
-            ],
-        )
-        .properties(height=380)
-        .interactive(bind_y=False)
+    figure = charts.rolling_returns_figure(
+        chart_data, chosen, years, config.settings.benchmark_name
     )
-    st.altair_chart(chart, width="stretch")
+    st.plotly_chart(figure, width="stretch", config={"displaylogo": False}, key="roll_chart")
     st.caption(
-        f"Grey dashed line = {config.settings.benchmark_name}. Each point is the annualised "
-        f"return of the {years}-year window ending that day."
+        f"Each point is the annualised return of the {years}-year window ending that day, for "
+        f"windows starting on or after {start:%d-%b-%Y}. Hover for all values on a date; click a "
+        "legend item to hide it, double-click to show only it. Grey dashed line = "
+        f"{config.settings.benchmark_name}."
     )
     st.dataframe(
         stats,

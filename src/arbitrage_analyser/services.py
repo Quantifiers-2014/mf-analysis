@@ -185,18 +185,27 @@ def rolling_view(
     amfi_codes: Sequence[int],
     years: int,
     level_pct: float,
+    start: date | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Spec screen 2. Returns (chart data, stats table).
 
     Chart data is long format: date, series, return_pct, is_benchmark.
+    `start` keeps only windows that begin on or after that date (each point is dated by the
+    window's end, so the first point is `start` + `years`). Stats cover the same windows.
     """
     settings = config.settings
-    bench = metrics.rolling_returns(db.read_benchmark(conn, settings.benchmark_name), years)
+    bench = _windows_from(
+        metrics.rolling_returns(db.read_benchmark(conn, settings.benchmark_name), years),
+        start,
+        years,
+    )
     frames = []
     stats_rows = []
     for code in amfi_codes:
         fund = config.fund_by_code(code)
-        returns = metrics.rolling_returns(db.read_nav(conn, code), years)
+        returns = _windows_from(
+            metrics.rolling_returns(db.read_nav(conn, code), years), start, years
+        )
         frames.append(_long(returns, fund.name, is_benchmark=False))
         summary = metrics.rolling_stats(returns, level_pct / 100)
         td = metrics.tracking_difference(returns, bench, settings.max_gap_days)
@@ -210,6 +219,25 @@ def rolling_view(
         pd.concat(frames, ignore_index=True) if frames else _long(pd.Series(dtype=float), "", False)
     )
     return chart, pd.DataFrame(stats_rows)
+
+
+def _windows_from(returns: pd.Series, start: date | None, years: int) -> pd.Series:
+    """Rolling returns whose window starts on or after `start` (index = window end date)."""
+    if start is None or returns.empty:
+        return returns
+    first_end = pd.Timestamp(start) + pd.DateOffset(years=years)
+    return returns[returns.index >= first_end]
+
+
+def nav_start(conn: sqlite3.Connection, amfi_codes: Sequence[int]) -> date | None:
+    """Earliest NAV date stored for any of these funds: the default start of the analysis."""
+    if not amfi_codes:
+        return None
+    marks = ",".join("?" * len(amfi_codes))
+    first = _scalar(
+        conn, f"SELECT MIN(date) FROM nav WHERE amfi_code IN ({marks})", tuple(amfi_codes)
+    )
+    return date.fromisoformat(first) if first else None
 
 
 def _long(returns: pd.Series, name: str, is_benchmark: bool) -> pd.DataFrame:

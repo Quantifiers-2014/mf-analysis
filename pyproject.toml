@@ -10,7 +10,7 @@ requires-python = ">=3.11,<4.0"  # upper bound needed: Streamlit Cloud installs 
 dependencies = [
     "pandas>=2.2",
     "streamlit>=1.50",
-    "altair>=5.0",
+    "plotly>=5.24",
     "openpyxl>=3.1",
     "xlrd>=2.0",
     "lxml>=5.0",
@@ -57,5 +57,5 @@ files = ["src"]
 # pandas is checked as untyped: pandas-stubs flags most DataFrame/Series code as errors
 # (Hashable index labels, itertuples rows) without finding real defects.
 [[tool.mypy.overrides]]
-module = ["pandas", "pandas.*", "streamlit", "streamlit.*", "altair", "altair.*", "langfuse", "langfuse.*"]
+module = ["pandas", "pandas.*", "streamlit", "streamlit.*", "plotly", "plotly.*", "langfuse", "langfuse.*"]
 follow_imports = "skip"

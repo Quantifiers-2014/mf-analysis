@@ -245,6 +245,31 @@ def test_rolling_view(conn: db.sqlite3.Connection, config: AppConfig) -> None:
     assert pd.isna(stats.loc["Benchmark", "Avg tracking diff %"])
 
 
+def test_rolling_view_from_start_date(conn: db.sqlite3.Connection, config: AppConfig) -> None:
+    _load_all(conn, config)
+    _, full_stats = services.rolling_view(conn, config, [100001], 1, 7.0)
+    chart, stats = services.rolling_view(conn, config, [100001], 1, 7.0, date(2024, 3, 15))
+    # windows start on or after the start date, so the first window ends a year later
+    assert chart["date"].min() >= pd.Timestamp("2025-03-15")
+    assert chart["date"].min() < pd.Timestamp("2025-03-22")
+    assert set(chart["series"]) == {"Alpha Arbitrage Fund", "Benchmark"}
+    # stats describe the same, shorter set of windows
+    alpha = stats.set_index("Fund").loc["Alpha Arbitrage Fund", "Windows"]
+    full_alpha = full_stats.set_index("Fund").loc["Alpha Arbitrage Fund", "Windows"]
+    assert alpha == (chart["series"] == "Alpha Arbitrage Fund").sum() < full_alpha
+    # a start date after the data leaves nothing to show
+    late, _ = services.rolling_view(conn, config, [100001], 1, 7.0, date(2026, 6, 1))
+    assert late.empty
+
+
+def test_nav_start(conn: db.sqlite3.Connection, config: AppConfig) -> None:
+    assert services.nav_start(conn, [100001]) is None
+    assert services.nav_start(conn, []) is None
+    _load_all(conn, config)
+    # NAV is stored from history_start in config
+    assert services.nav_start(conn, [100001, 100002]) == date(2019, 1, 1)
+
+
 def test_rolling_view_without_benchmark(conn: db.sqlite3.Connection, config: AppConfig) -> None:
     ingest.refresh_nav(conn, config, _fetcher(config, {100001: 0.07, 100002: 0.07}))
     chart, stats = services.rolling_view(conn, config, [100001], 1, 7.0)
