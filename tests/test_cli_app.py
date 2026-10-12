@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,17 @@ def test_app_renders_all_tabs(env: Path, config_file: Path) -> None:
     assert not app.exception
     cols = list(app.dataframe[0].value.columns)
     assert "P2P return % (1Y)" in cols and "Tracking diff % (1Y)" in cols
+
+    # rolling returns: Plotly chart, start date defaults to the first NAV date
+    assert len(app.get("plotly_chart")) == 1
+    start = app.date_input(key="roll_start")
+    assert start.value == date(2019, 1, 1)
+    start.set_value(date(2024, 1, 1)).run()
+    assert not app.exception
+    assert any("starting on or after 01-Jan-2024" in c.value for c in app.caption)
+    start.set_value(date(2026, 9, 1)).run()
+    assert any("Not enough history" in i.value for i in app.info)
+    app.date_input(key="roll_start").set_value(date(2019, 1, 1)).run()
 
     app.radio(key="roll_window").set_value(5).run()
     assert not app.exception
