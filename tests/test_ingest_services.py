@@ -3,13 +3,14 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from arbitrage_analyser import db, ingest, metrics, services
+from arbitrage_analyser import db, factsheets, ingest, metrics, services
 from arbitrage_analyser.config import AppConfig
 from arbitrage_analyser.sources import SourceError
 from arbitrage_analyser.sources.mfapi import SchemeHistory
 from tests.conftest import (
-    aaum_rows,
     benchmark_csv,
+    factsheet_values,
+    fake_factsheets,
     growth_series,
     history_for,
     ter_rows,
@@ -42,8 +43,8 @@ def _load_all(conn: db.sqlite3.Connection, config: AppConfig) -> None:
         )
     )
     assert ingest.import_ter(conn, config, ter).ok
-    aaum = xlsx_bytes(aaum_rows([(100001, "Alpha", 7571234.0), (100002, "Beta", 3061752.0)]))
-    assert ingest.import_aaum(conn, config, aaum).ok
+    download, read = fake_factsheets(factsheet_values())
+    assert factsheets.fetch_factsheets(conn, config, date(2026, 10, 18), download, read).ok
 
 
 def test_refresh_nav_stores_from_history_start(
@@ -133,7 +134,6 @@ def test_import_errors_are_reported(conn: db.sqlite3.Connection, config: AppConf
     assert not ingest.import_ter(conn, config, b"").ok
     no_match = xlsx_bytes(ter_rows([("Gamma Fund", "04/10/2026", 0.1, 0.2)]))
     assert "No TER values in the file" in ingest.import_ter(conn, config, no_match).errors[0]
-    assert not ingest.import_aaum(conn, config, xlsx_bytes(aaum_rows([(5, "x", 1.0)]))).ok
 
 
 def test_ter_unit_flags(conn: db.sqlite3.Connection, config: AppConfig) -> None:
@@ -155,8 +155,11 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
         "P2P return % (3Y)",
         "Tracking diff % (3Y)",
         "AUM (Rs Cr)",
-        "BER %",
+        "AAUM (Rs Cr)",
+        "BER % (AMFI)",
+        "BER % (factsheet)",
         "Total TER %",
+        "Turnover",
         "Exit load",
         "Factsheet",
         "Monthly portfolio",
@@ -166,13 +169,19 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
     alpha = table.loc["Alpha Arbitrage Fund"]
     assert alpha["NAV"] == pytest.approx(db.read_nav(conn, 100001).iloc[-1])
     assert alpha["Fund manager"] == "A. Manager (since 03-Oct-2019)"
-    assert alpha["Factsheet"] == "https://example.com/alpha/factsheets"
+    # the fetched PDF, opening at the fund's page; Beta has no factsheet set: its AMC page link
+    assert alpha["Factsheet"] == "https://example.com/alpha/factsheet-october-2026.pdf#page=62"
+    assert pd.isna(table.loc["Beta Arbitrage Fund", "Factsheet"])
     assert alpha["Monthly portfolio"] is None
     assert table.loc["Beta Arbitrage Fund", "Fund manager"] == (
         "B. Manager, C. Manager (since Dec 2014)"
     )
-    assert alpha["AUM (Rs Cr)"] == pytest.approx(75712.34)
-    assert alpha["BER %"] == pytest.approx(0.33)
+    assert alpha["AUM (Rs Cr)"] == pytest.approx(75274.99)
+    assert alpha["AAUM (Rs Cr)"] == pytest.approx(75770.41)
+    assert alpha["BER % (AMFI)"] == pytest.approx(0.33)
+    assert alpha["BER % (factsheet)"] == pytest.approx(0.34)
+    assert alpha["Turnover"] == "Equity 1.60, Gross 11.57"
+    assert pd.isna(table.loc["Beta Arbitrage Fund", "AUM (Rs Cr)"])
     assert alpha["Total TER %"] == pytest.approx(2.32)
     assert alpha["Exit load"] == "0.25% within 15 days"
     assert alpha["P2P return % (3Y)"] == pytest.approx(7.2, abs=0.05)
@@ -183,7 +192,8 @@ def test_fund_comparison(conn: db.sqlite3.Connection, config: AppConfig) -> None
     # as-of dates move to the info section
     assert view.nav_as_of["Alpha Arbitrage Fund"] == date(2026, 10, 6)
     assert view.td_as_of["Alpha Arbitrage Fund"] == date(2026, 9, 30)
-    assert view.ter_as_of and view.aaum_quarter
+    assert view.ter_as_of
+    assert view.factsheet_as_of == {"Alpha Arbitrage Fund": "2026-09-30"}
     assert services.fund_comparison(conn, config, "Liquid").table.empty
 
 
@@ -284,11 +294,12 @@ def test_data_health_statuses(conn: db.sqlite3.Connection, config: AppConfig) ->
     health = services.data_health(conn, config, date(2026, 10, 7)).set_index("Dataset")
     assert health.loc["NAV", "Status"] == "OK"  # 1 day old
     assert health.loc["Benchmark", "Status"] == "OK"  # 7 days old
-    assert health.loc["Average AUM", "Data up to"] == "2026-09-30"
+    assert health.loc["Factsheet values", "Data up to"] == "2026-09-30"
+    assert health.loc["Factsheet values", "Status"] == "OK"  # Beta has no factsheet set
     later = services.data_health(conn, config, date(2026, 10, 12)).set_index("Dataset")
     assert later.loc["NAV", "Status"] == "Due"  # 6 days old
     much_later = services.data_health(conn, config, date(2027, 2, 20)).set_index("Dataset")
-    assert much_later.loc["Average AUM", "Status"] == "Overdue"
+    assert much_later.loc["Factsheet values", "Status"] == "Overdue"
 
 
 def test_data_health_reports_funds_without_nav(
@@ -324,8 +335,10 @@ def test_column_help_carries_definitions_and_dates(
     assert "NIFTY 50 Arbitrage" in help_text["Tracking diff % (1Y)"]
     assert "as of 30-Sep-2026" in help_text["Tracking diff % (1Y)"]
     assert "exit load above 0.25%" in help_text["Flag"].lower()
-    assert "TER as of" in help_text["BER %"] and "TER as of" in help_text["Total TER %"]
-    assert "quarter ending 30-Sep-2026" in help_text["AUM (Rs Cr)"]
+    assert "TER as of" in help_text["BER % (AMFI)"] and "TER as of" in help_text["Total TER %"]
+    for column in ("AUM (Rs Cr)", "AAUM (Rs Cr)", "BER % (factsheet)", "Turnover"):
+        assert "factsheet, as of 30-Sep-2026" in help_text[column], column
+    assert "not comparable across AMCs" in help_text["Turnover"]
     # every table column that needs a definition has one
     assert {"NAV", "Factsheet", "Monthly portfolio", "Flag"} <= set(help_text)
 
@@ -334,4 +347,4 @@ def test_column_help_without_data(conn: db.sqlite3.Connection, config: AppConfig
     help_text = services.column_help(config, services.fund_comparison(conn, config, "Arbitrage"))
     assert "no NAV data yet" in help_text["NAV"]
     assert "no benchmark data yet" in help_text["Tracking diff % (3Y)"]
-    assert "AUM (Rs Cr)" not in help_text
+    assert "no factsheet data yet" in help_text["AUM (Rs Cr)"]

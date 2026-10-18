@@ -43,11 +43,17 @@ CREATE TABLE IF NOT EXISTS ter (
     total_ter         REAL NOT NULL,
     PRIMARY KEY (amfi_code, date)
 );
-CREATE TABLE IF NOT EXISTS aaum (
-    amfi_code     INTEGER NOT NULL,
-    quarter_end   TEXT NOT NULL,
-    aaum_crore    REAL NOT NULL,
-    PRIMARY KEY (amfi_code, quarter_end)
+CREATE TABLE IF NOT EXISTS factsheet (
+    amfi_code       INTEGER NOT NULL,
+    as_of           TEXT NOT NULL,
+    aum_crore       REAL,
+    aaum_crore      REAL,
+    turnover        TEXT,
+    direct_ber      REAL,
+    source_url      TEXT NOT NULL,
+    page            INTEGER NOT NULL,
+    fetched_at      TEXT NOT NULL,
+    PRIMARY KEY (amfi_code, as_of)
 );
 CREATE TABLE IF NOT EXISTS validation_flags (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,16 +175,52 @@ def upsert_ter(conn: sqlite3.Connection, frame: pd.DataFrame) -> int:
     return len(rows)
 
 
-def upsert_aaum(conn: sqlite3.Connection, frame: pd.DataFrame) -> int:
-    """`frame` columns: amfi_code, quarter_end (Timestamp), aaum_crore."""
+FACTSHEET_COLUMNS = (
+    "amfi_code",
+    "as_of",
+    "aum_crore",
+    "aaum_crore",
+    "turnover",
+    "direct_ber",
+    "source_url",
+    "page",
+    "fetched_at",
+)
+
+
+def upsert_factsheet(conn: sqlite3.Connection, frame: pd.DataFrame) -> int:
+    """`frame` has FACTSHEET_COLUMNS; as_of and fetched_at as ISO text, missing values as None
+    or NaN. A stored row for the same fund and as-of date is replaced only by a row fetched
+    at the same time or later (fetched_at), so loading an older copy of the values file
+    changes nothing."""
     rows = [
-        (int(r.amfi_code), r.quarter_end.date().isoformat(), float(r.aaum_crore))
-        for r in frame[["amfi_code", "quarter_end", "aaum_crore"]].itertuples(index=False)
+        (
+            int(r.amfi_code),
+            str(r.as_of),
+            _opt(r.aum_crore),
+            _opt(r.aaum_crore),
+            None if _missing(r.turnover) else str(r.turnover),
+            _opt(r.direct_ber),
+            str(r.source_url),
+            int(r.page),
+            str(r.fetched_at),
+        )
+        for r in frame[list(FACTSHEET_COLUMNS)].itertuples(index=False)
     ]
+    before = conn.total_changes
+    marks = ", ".join("?" * len(FACTSHEET_COLUMNS))
+    updates = ", ".join(f"{c}=excluded.{c}" for c in FACTSHEET_COLUMNS[2:])
     conn.executemany(
-        "INSERT OR REPLACE INTO aaum (amfi_code, quarter_end, aaum_crore) VALUES (?, ?, ?)", rows
+        f"""INSERT INTO factsheet ({", ".join(FACTSHEET_COLUMNS)}) VALUES ({marks})
+            ON CONFLICT(amfi_code, as_of) DO UPDATE SET {updates}
+            WHERE excluded.fetched_at >= factsheet.fetched_at""",
+        rows,
     )
-    return len(rows)
+    return conn.total_changes - before  # rows written
+
+
+def _missing(value: object) -> bool:
+    return value is None or (isinstance(value, float) and pd.isna(value))
 
 
 def record_flags(conn: sqlite3.Connection, flags: Iterable[Flag]) -> int:
@@ -249,13 +291,28 @@ def read_latest_ter(conn: sqlite3.Connection) -> pd.DataFrame:
     )
 
 
-def read_latest_aaum(conn: sqlite3.Connection) -> pd.DataFrame:
+def read_latest_factsheet(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Each fund's factsheet row with the latest as-of date."""
     return pd.read_sql_query(
-        """SELECT a.* FROM aaum a
-           JOIN (SELECT amfi_code, MAX(quarter_end) AS q FROM aaum GROUP BY amfi_code) m
-             ON a.amfi_code = m.amfi_code AND a.quarter_end = m.q""",
+        """SELECT f.* FROM factsheet f
+           JOIN (SELECT amfi_code, MAX(as_of) AS as_of FROM factsheet GROUP BY amfi_code) m
+             ON f.amfi_code = m.amfi_code AND f.as_of = m.as_of""",
         conn,
     )
+
+
+def read_factsheets(conn: sqlite3.Connection) -> pd.DataFrame:
+    """All stored factsheet rows, oldest first (for the CSV export)."""
+    return pd.read_sql_query("SELECT * FROM factsheet ORDER BY amfi_code, as_of", conn)
+
+
+def ber_on(conn: sqlite3.Connection, amfi_code: int, day: str) -> float | None:
+    """AMFI Direct Plan BER in force on `day` (latest TER row on or before it)."""
+    row = conn.execute(
+        "SELECT base_ter FROM ter WHERE amfi_code=? AND date<=? ORDER BY date DESC LIMIT 1",
+        (amfi_code, day),
+    ).fetchone()
+    return None if row is None else float(row[0])
 
 
 def read_flags(conn: sqlite3.Connection, status: str = "open") -> pd.DataFrame:

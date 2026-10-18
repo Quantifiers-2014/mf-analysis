@@ -287,6 +287,6 @@ def test_compare_funds_gives_ter_date_and_definitions(
     assert not is_error
     assert result["ter_as_of_by_fund"] == {"Alpha Arbitrage Fund": "2026-09-30"}
     alpha = next(r for r in result["rows"] if r["Fund"] == "Alpha Arbitrage Fund")
-    assert alpha["BER %"] == pytest.approx(0.33)
-    assert "TER as of 30-Sep-2026" in result["column_definitions"]["BER %"]
+    assert alpha["BER % (AMFI)"] == pytest.approx(0.33)
+    assert "TER as of 30-Sep-2026" in result["column_definitions"]["BER % (AMFI)"]
     assert any("ter_as_of_by_fund" in n for n in result["notes"])

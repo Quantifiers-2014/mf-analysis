@@ -11,6 +11,18 @@
 #              monthly portfolio disclosures, shown in Fund comparison. Checked 08-Oct-2026. Not set
 #              where no fixed public page was found (Kotak factsheet: link changes each month;
 #              ICICI: site could not be checked; Edelweiss portfolio: page asks for folio/PAN).
+# [funds.factsheet] : where the monthly factsheet PDF is, read by fetch-factsheets (AUM, AAUM,
+#              portfolio turnover, Direct Plan BER). Links as seen on the AMC sites, Oct-2026.
+#   link       : the PDF link. Placeholders, filled for the factsheet edition month (newest first:
+#                this month, then the two before): {month} september, {Month} September, {mm} 09,
+#                {year} 2026, {next_mm} / {next_year} the month after. No placeholders = the
+#                link never changes. Write spaces as %20.
+#   listing + link_text : for AMCs whose PDF name has an upload timestamp: the page that lists
+#                the factsheets, and the text the wanted PDF link contains.
+#   page_title : the fund's page heading in the PDF (largest text on the page).
+#   turnover   : name shown in the app = label printed in the factsheet.
+#              The edition month is only used to find the file: the as-of date shown in the app
+#              is the one printed on the fund's page (an "October" edition can hold September data).
 # ter_match  : text that identifies the fund's row in the AMFI TER file (case-insensitive).
 #              Used only when [settings.features] ter = true.
 # exit_load_pct / exit_load_days : 0 and 0 means no exit load.
@@ -33,8 +45,8 @@ overlap_tolerance = 0.01         # Benchmark re-upload must match stored values 
 
 # Switch optional datasets on or off. Off hides their columns, uploads, commands and freshness rows.
 [settings.features]
-ter = true     # BER and Total TER from the AMFI TER file (Direct Plan)
-aaum = false   # Average AUM from the AMFI AAUM file
+ter = true        # BER and Total TER from the AMFI TER file (Direct Plan)
+factsheet = true  # AUM, AAUM, turnover and Direct BER from the AMC factsheets
 
 # AMFI TER page "Sub Category" id per fund category, used by fetch-ter / "Fetch TER from AMFI".
 # Seen 08-Oct-2026 in the page's request when Sub Category = Arbitrage Fund (strCat=46).
@@ -45,7 +57,7 @@ Arbitrage = 46
 [settings.freshness]
 nav = [4, 7]
 ter = [45, 60]
-aaum = [110, 140]
+factsheet = [50, 80]  # month-end data, published 1-3 weeks after the month ends
 benchmark = [45, 60]
 
 [[funds]]
@@ -62,6 +74,11 @@ exit_load_days = 30
 fund_managers = [{ name = "Hiten Shah", since = "2019-10-03" }]
 # Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
 # indmoney (manager since)
+
+[funds.factsheet]
+link = "https://assets.kotakmf.com/kotak_admin/cms/essential_pdf/4205/Kotak%20Arbitrage%20Fund_Factsheet%20One%20Pager.pdf"
+page_title = "Kotak Arbitrage Fund"
+turnover = { Equity = "Equity Portfolio Turnover", Total = "Total Portfolio Turnover" }
 
 [[funds]]
 name = "SBI Arbitrage Opportunities Fund"
@@ -81,6 +98,12 @@ fund_managers = [
 ]
 # Sources: mfapi.in (code, ISIN), SBI factsheet Jul-2026 (exit load, managers, since)
 
+[funds.factsheet]
+# The site adds ?sfvrsn=... to this link; the link is used without it.
+link = "https://www.sbimf.com/docs/default-source/scheme-factsheets/all-sbimf-schemes-factsheet-{month}-{year}.pdf"
+page_title = "SBI Arbitrage Fund"
+turnover = { Equity = "Equity Turnover", Gross = "Gross Exposure Turnover" }
+
 [[funds]]
 name = "ICICI Prudential Arbitrage Fund"
 amc = "ICICI Prudential"
@@ -93,6 +116,11 @@ exit_load_pct = 0.25
 exit_load_days = 15
 fund_managers = [{ name = "Darshil Dedhia", since = "2024-09" }]
 # Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww (exit load, manager since)
+
+[funds.factsheet]
+link = "https://www.icicipruamc.com/blob/knowledgecentre/factsheet-schemes/Schemes/2.%20Hybrid%20Schemes/ICICI%20Prudential%20Arbitrage%20Fund.pdf"
+page_title = "ICICI Prudential Arbitrage Fund"
+# turnover is not printed in this one-page factsheet
 
 [[funds]]
 name = "Invesco India Arbitrage Fund"
@@ -113,6 +141,12 @@ fund_managers = [
 # Sources: AMFI AAUM page + mfapi.in (code, ISIN), Invesco factsheet Aug-2026
 # (exit load, managers, since)
 
+[funds.factsheet]
+# The site adds ?sfvrsn=... to this link; the link is used without it.
+link = "https://www.invescomutualfund.com/docs/default-source/factsheet/invesco-mf-factsheet-{month}-{year}.pdf"
+page_title = "Invesco India Arbitrage Fund"
+turnover = { "1Y" = "Portfolio Turnover Ratio (1 Year)" }
+
 [[funds]]
 name = "Aditya Birla Sun Life Arbitrage Fund"
 amc = "Aditya Birla Sun Life"
@@ -128,6 +162,12 @@ exit_load_days = 0
 fund_managers = [{ name = "Lovelish Solanki", since = "2014-12" }]
 # Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load Nil since
 # 27-Jul-2026), Groww (manager since)
+
+[funds.factsheet]
+# The "October" edition holds September data.
+link = "https://mutualfund.adityabirlacapital.com/-/media/bsl/files/resources/factsheets/{year}/empower-for-the-month-of-{month}-{year}.pdf"
+page_title = "Aditya Birla Sun Life Arbitrage Fund"
+turnover = { Gross = "Gross Exposure Turnover" }  # equity turnover is not printed
 
 [[funds]]
 name = "Tata Arbitrage Fund"
@@ -145,6 +185,12 @@ fund_managers = [{ name = "Sailesh Jain", since = "2018-12" }]
 # Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
 # Groww (manager since)
 
+[funds.factsheet]
+# Uploaded in the folder of the month after the edition (September 2026 is in 2026-10).
+link = "https://www.tatamutualfund.com/system/files/{next_year}-{next_mm}/Tata%20Factsheet%20-%20{Month}%20{year}.pdf"
+page_title = "Tata Arbitrage Fund"
+turnover = { Equity = "Equity Turnover", Gross = "Gross Exposure Turnover" }
+
 [[funds]]
 name = "Nippon India Arbitrage Fund"
 amc = "Nippon India"
@@ -161,6 +207,12 @@ fund_managers = [{ name = "Nemish Sheth", since = "2025-03" }]
 # Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
 # Groww (manager since)
 
+[funds.factsheet]
+# The "September" edition holds August data.
+link = "https://mf.nipponindiaim.com/InvestorServices/FactSheetsDocuments/Nippon-FS-{Month}-{year}.pdf"
+page_title = "Nippon India Arbitrage Fund"
+turnover = { Equity = "Equity Turnover", Gross = "Gross Exposure Turnover" }
+
 [[funds]]
 name = "Edelweiss Arbitrage Fund"
 amc = "Edelweiss"
@@ -175,3 +227,11 @@ exit_load_days = 15
 fund_managers = [{ name = "Bhavesh Jain", since = "2014-06" }]
 # Sources: mfapi.in (code), Zerodha Coin (ISIN, manager), Groww/Tickertape (exit load),
 # Groww (manager since)
+
+[funds.factsheet]
+# The PDF name ends with an upload timestamp (Factsheet__October_2026_17102026141628.pdf), so the
+# link is read from the listing page. The "October" edition holds September data.
+listing = "https://www.edelweissmf.com/downloads/factsheets"
+link_text = "Factsheet__{Month}_{year}_"
+page_title = "Edelweiss Arbitrage Fund"
+turnover = { Equity = "Equity Turnover", Gross = "Gross Exposure Turnover" }

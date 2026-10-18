@@ -240,8 +240,14 @@ def compare_funds(
         notes.append("Tracking difference is empty because no benchmark data is loaded.")
     if config.settings.ter_enabled:
         notes.append(
-            "BER % and Total TER % are Direct Plan expense ratios from AMFI, each as of the date "
-            "in ter_as_of_by_fund; funds missing there have no TER loaded."
+            "BER % (AMFI) and Total TER % are Direct Plan expense ratios from AMFI, each as of "
+            "the date in ter_as_of_by_fund; funds missing there have no TER loaded."
+        )
+    if config.settings.factsheet_enabled:
+        notes.append(
+            "AUM, AAUM, BER % (factsheet) and Turnover are read from each AMC's factsheet, as of "
+            "the date in factsheet_as_of_by_fund; blank means not printed or not loaded. "
+            "Turnover is text as printed and is not comparable across AMCs."
         )
     return _out(
         {
@@ -250,7 +256,7 @@ def compare_funds(
             "nav_as_of_by_fund": view.nav_as_of,
             "tracking_difference_as_of_by_fund": view.td_as_of,
             "ter_as_of_by_fund": view.ter_as_of,
-            "aum_quarter_by_fund": view.aaum_quarter,
+            "factsheet_as_of_by_fund": view.factsheet_as_of,
             "column_definitions": services.column_help(config, view),
             "notes": notes,
             "source": NAV_SOURCE,
@@ -341,8 +347,8 @@ def get_data_status(
 ) -> dict[str, Any]:
     health = services.data_health(conn, config, date.today())
     flags = db.read_flags(conn, "open")
-    counts = {name: _count(conn, name) for name in ("nav", "benchmark", "ter", "aaum")}
-    switched_off = [d for d in ("ter", "aaum") if d not in config.settings.active_datasets()]
+    counts = {name: _count(conn, name) for name in ("nav", "benchmark", "ter", "factsheet")}
+    switched_off = [d for d in ("ter", "factsheet") if d not in config.settings.active_datasets()]
     return _out(
         {
             "datasets": _records(health),

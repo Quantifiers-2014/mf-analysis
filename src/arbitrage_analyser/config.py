@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import string
 import tomllib
 from dataclasses import dataclass, field
 from datetime import date
@@ -10,7 +12,11 @@ from typing import Any
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "funds.toml"
 
-DATASETS = ("nav", "ter", "aaum", "benchmark")
+DATASETS = ("nav", "ter", "factsheet", "benchmark")
+
+# Placeholders allowed in a factsheet link, filled per factsheet edition month (e.g. Sep-2026):
+# month=september Month=September mm=09 year=2026, next_mm/next_year = the month after (10, 2026).
+LINK_FIELDS = frozenset({"month", "Month", "mm", "year", "next_mm", "next_year"})
 
 
 class ConfigError(ValueError):
@@ -37,6 +43,23 @@ class FundManager:
 
 
 @dataclass(frozen=True)
+class FactsheetSource:
+    """Where a fund's monthly factsheet is and how to find the fund in it.
+
+    Either `link` (the PDF link, with LINK_FIELDS placeholders when it changes each month), or
+    `listing` (a page listing the factsheets) plus `link_text` (text in the PDF link to pick,
+    with placeholders). `page_title`: the fund's page heading in the PDF. `turnover`: (name shown
+    in the app, label printed in the factsheet) pairs.
+    """
+
+    page_title: str
+    link: str | None = None
+    listing: str | None = None
+    link_text: str | None = None
+    turnover: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class Fund:
     name: str
     amc: str
@@ -50,6 +73,7 @@ class Fund:
     amfi_mf_id: int | None = None  # AMFI fund house id (MF_ID), used to fetch TER
     factsheet_url: str | None = None  # AMC page listing monthly factsheets
     portfolio_url: str | None = None  # AMC page listing monthly portfolio disclosures
+    factsheet: FactsheetSource | None = None  # monthly factsheet PDF, read by fetch-factsheets
 
 
 @dataclass(frozen=True)
@@ -72,13 +96,14 @@ class Settings:
     overlap_tolerance: float
     freshness: dict[str, Freshness]
     ter_enabled: bool
-    aaum_enabled: bool
+    factsheet_enabled: bool
     # Fund category -> AMFI TER page "Sub Category" id (strCat), used to fetch TER from AMFI.
     amfi_ter_category_ids: dict[str, int] = field(default_factory=dict)
 
     def active_datasets(self) -> tuple[str, ...]:
-        """Datasets in use. TER and AAUM can be switched off in [settings.features]."""
-        off = {"ter": not self.ter_enabled, "aaum": not self.aaum_enabled}
+        """Datasets in use. TER and factsheet values can be switched off in
+        [settings.features]."""
+        off = {"ter": not self.ter_enabled, "factsheet": not self.factsheet_enabled}
         return tuple(d for d in DATASETS if not off.get(d, False))
 
 
@@ -144,7 +169,7 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
         overlap_tolerance=float(_require(raw, "overlap_tolerance", (int, float), where)),
         freshness=freshness,
         ter_enabled=_require(features, "ter", bool, f"{where}.features"),
-        aaum_enabled=_require(features, "aaum", bool, f"{where}.features"),
+        factsheet_enabled=_require(features, "factsheet", bool, f"{where}.features"),
         amfi_ter_category_ids=_category_ids(raw.get("amfi_ter_category_ids", {}), where),
     )
     if settings.outlier_multiplier <= 0 or settings.outlier_lookback_days <= 0:
@@ -173,6 +198,61 @@ def _url(raw: dict[str, Any], key: str, where: str) -> str | None:
     if not url.startswith("https://") or " " in url:
         raise ConfigError(f"{where}: {key} must be an https:// link")
     return url
+
+
+def _fields(template: str) -> set[str]:
+    return {name for _, name, _, _ in string.Formatter().parse(template) if name is not None}
+
+
+def _template(raw: dict[str, Any], key: str, where: str, https: bool) -> str | None:
+    if key not in raw:
+        return None
+    text: str = _require(raw, key, str, where).strip()
+    if not text:
+        raise ConfigError(f"{where}: {key} must not be empty")
+    if https and (not text.startswith("https://") or " " in text):
+        raise ConfigError(f"{where}: {key} must be an https:// link (write spaces as %20)")
+    try:
+        unknown = _fields(text) - LINK_FIELDS
+    except ValueError as exc:
+        raise ConfigError(f"{where}: {key} has a broken {{placeholder}}: {exc}") from exc
+    if unknown:
+        raise ConfigError(
+            f"{where}: {key} has unknown placeholders {sorted(unknown)}; "
+            f"allowed: {sorted(LINK_FIELDS)}"
+        )
+    return text
+
+
+def _parse_factsheet(raw: object, where: str) -> FactsheetSource:
+    where = f"{where} factsheet"
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: must be a table ([funds.factsheet])")
+    title = _require(raw, "page_title", str, where).strip()
+    if not re.search(r"[A-Za-z]", title):
+        raise ConfigError(f"{where}: page_title must not be empty")
+    link = _template(raw, "link", where, https=True)
+    listing = _template(raw, "listing", where, https=True)
+    link_text = _template(raw, "link_text", where, https=False)
+    if (link is None) == (listing is None):
+        raise ConfigError(f"{where}: set either link or listing (with link_text)")
+    if listing is not None and (link_text is None or _fields(listing)):
+        raise ConfigError(f"{where}: listing needs link_text, and takes no placeholders")
+    if link is not None and link_text is not None:
+        raise ConfigError(f"{where}: link_text is used only with listing")
+    turnover_raw = raw.get("turnover", {})
+    if not isinstance(turnover_raw, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) and k.strip() and v.strip()
+        for k, v in turnover_raw.items()
+    ):
+        raise ConfigError(f'{where}: turnover must be a table of name = "printed label"')
+    return FactsheetSource(
+        page_title=title,
+        link=link,
+        listing=listing,
+        link_text=link_text,
+        turnover=tuple((k.strip(), v.strip()) for k, v in turnover_raw.items()),
+    )
 
 
 def _parse_manager(raw: object, where: str) -> FundManager:
@@ -218,6 +298,7 @@ def _parse_fund(raw: dict[str, Any], index: int) -> Fund:
         amfi_mf_id=_require(raw, "amfi_mf_id", int, where) if "amfi_mf_id" in raw else None,
         factsheet_url=_url(raw, "factsheet_url", where),
         portfolio_url=_url(raw, "portfolio_url", where),
+        factsheet=_parse_factsheet(raw["factsheet"], where) if "factsheet" in raw else None,
     )
     for field_name in ("name", "amc", "category", "ter_match"):
         if not getattr(fund, field_name):

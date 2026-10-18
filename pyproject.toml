@@ -15,6 +15,9 @@ dependencies = [
     "xlrd>=2.0",
     "lxml>=5.0",
     "requests>=2.31",
+    # AMC factsheet PDFs: pdfplumber reads word positions, pypdfium2 finds the fund's page fast
+    "pdfplumber>=0.11",
+    "pypdfium2>=4.30",
     # "Ask the analyst" agent. Regular dependencies, not an extra: Streamlit Community Cloud
     # installs pyproject.toml without optional extras, so an [agent] extra was never installed there.
     "openai>=1.60",

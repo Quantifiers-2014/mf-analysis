@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +12,11 @@ import openpyxl
 import pandas as pd
 import pytest
 
-from arbitrage_analyser import db
-from arbitrage_analyser.config import AppConfig, load_config
+from arbitrage_analyser import db, factsheets
+from arbitrage_analyser.config import AppConfig, FactsheetSource, load_config
+from arbitrage_analyser.runtime import FACTSHEET_CSV_ENV
+from arbitrage_analyser.sources.factsheet_links import Download
+from arbitrage_analyser.sources.factsheet_pdf import FactsheetValues
 from arbitrage_analyser.sources.mfapi import SchemeHistory
 
 CONFIG_TEXT = """
@@ -28,7 +32,7 @@ overlap_tolerance = 0.01
 
 [settings.features]
 ter = true
-aaum = true
+factsheet = true
 
 [settings.amfi_ter_category_ids]
 Arbitrage = 46
@@ -36,7 +40,7 @@ Arbitrage = 46
 [settings.freshness]
 nav = [4, 7]
 ter = [45, 60]
-aaum = [110, 140]
+factsheet = [50, 80]
 benchmark = [45, 60]
 
 [[funds]]
@@ -52,6 +56,11 @@ exit_load_pct = 0.25
 exit_load_days = 15
 fund_managers = [{ name = "A. Manager", since = "2019-10-03" }]
 
+[funds.factsheet]
+link = "https://example.com/alpha/factsheet-{month}-{year}.pdf"
+page_title = "Alpha Arbitrage Fund"
+turnover = { Equity = "Equity Turnover", Gross = "Gross Exposure Turnover" }
+
 [[funds]]
 name = "Beta Arbitrage Fund"
 amc = "Beta"
@@ -64,6 +73,12 @@ exit_load_pct = 0.5
 exit_load_days = 15
 fund_managers = ["B. Manager", { name = "C. Manager", since = "2014-12" }]
 """
+
+
+@pytest.fixture(autouse=True)
+def _no_repo_factsheet_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep tests away from the repository's published/factsheet_values.csv."""
+    monkeypatch.setenv(FACTSHEET_CSV_ENV, str(tmp_path / "factsheet_values.csv"))
 
 
 @pytest.fixture
@@ -185,33 +200,42 @@ def ter_rows(data: list[tuple[str, str, float | None, float | None]]) -> list[li
     return rows
 
 
-def aaum_rows(
-    entries: list[tuple[int, str, float]], title: str | None = None
-) -> list[list[object]]:
-    title = title or (
-        "Average Assets under Management (AAUM) for the quarter of "
-        "July - September 2026 (Rs in Lakhs)"
+def factsheet_values(
+    as_of: date = date(2026, 9, 30),
+    aum: float | None = 75274.99,
+    aaum: float | None = 75770.41,
+    turnover: str | None = "Equity 1.60, Gross 11.57",
+    ber: float | None = 0.34,
+    page: int = 62,
+) -> FactsheetValues:
+    missing = tuple(
+        n for n, v in (("AAUM", aaum), ("Turnover", turnover), ("Direct BER", ber)) if v is None
     )
-    rows: list[list[object]] = [
-        [title, None, None, None],
-        ["AMFI Code", "Scheme NAV Name", "Average AUM for The Month", None],
-        [
-            None,
-            None,
-            "Excluding Fund of Funds - Domestic but including Fund of Funds - Overseas",
-            "Fund Of Funds - Domestic",
-        ],
-    ]
-    rows.extend([code, name, value, 0] for code, name, value in entries)
-    return rows
+    return FactsheetValues(page, as_of, aum, aaum, turnover, ber, missing)
 
 
-CONFIG_TEXT_OFF = CONFIG_TEXT.replace("ter = true\naaum = true", "ter = false\naaum = false")
+def fake_factsheets(
+    values: FactsheetValues, url: str = "https://example.com/alpha/factsheet-october-2026.pdf"
+) -> tuple[factsheets.FactsheetDownloader, factsheets.FactsheetReader]:
+    """(download, read) fakes for factsheets.fetch_factsheets: every fund gets `values`."""
+
+    def download(source: FactsheetSource, today: date) -> Download:
+        return Download(url, b"%PDF-1.7 fake")
+
+    def read(content: bytes, title: str, turnover: dict[str, str]) -> FactsheetValues:
+        return values
+
+    return download, read
+
+
+CONFIG_TEXT_OFF = CONFIG_TEXT.replace(
+    "ter = true\nfactsheet = true", "ter = false\nfactsheet = false"
+)
 
 
 @pytest.fixture
 def config_file_off(tmp_path: Path) -> Path:
-    """Config with the optional TER and AAUM datasets switched off."""
+    """Config with the optional TER and factsheet datasets switched off."""
     path = tmp_path / "funds_off.toml"
     path.write_text(CONFIG_TEXT_OFF)
     return path

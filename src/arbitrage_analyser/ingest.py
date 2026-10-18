@@ -14,7 +14,6 @@ import pandas as pd
 from arbitrage_analyser import db
 from arbitrage_analyser.config import AppConfig
 from arbitrage_analyser.sources import SourceError
-from arbitrage_analyser.sources.aaum import parse_aaum
 from arbitrage_analyser.sources.amfi_ter_api import fetch_ter_records
 from arbitrage_analyser.sources.benchmark import parse_benchmark_csv
 from arbitrage_analyser.sources.mfapi import SchemeHistory, fetch_history
@@ -253,21 +252,3 @@ def _ter_notes(unmatched: list[str], blank: list[str]) -> list[str]:
     if blank:
         notes.append("Skipped rows with blank BER or Total TER: " + ", ".join(blank))
     return notes
-
-
-def import_aaum(conn: sqlite3.Connection, config: AppConfig, content: bytes) -> LoadResult:
-    result = LoadResult()
-    try:
-        parsed = parse_aaum(content, config.funds)
-    except SourceError as exc:
-        result.errors.append(str(exc))
-        return result
-    if parsed.rows.empty:
-        result.errors.append("The file has no rows for any configured fund code")
-        return result
-    result.rows = db.upsert_aaum(conn, parsed.rows)
-    result.notes.append(
-        f"Quarter ending {parsed.quarter_end.date()}: " + ", ".join(parsed.funds_found)
-    )
-    db.log_refresh(conn, "aaum", result.rows)
-    return result
