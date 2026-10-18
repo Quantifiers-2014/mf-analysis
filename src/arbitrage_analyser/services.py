@@ -326,13 +326,10 @@ def data_health(conn: sqlite3.Connection, config: AppConfig, today: date) -> pd.
             (config.settings.benchmark_name,),
         ),
     }
-    runs = db.read_refresh_log(conn).set_index("dataset")["refreshed_at"].to_dict()
-    # factsheet values also arrive from the repository's values file: show when they were read
-    runs["factsheet"] = _scalar(conn, "SELECT MAX(fetched_at) FROM factsheet")
     meta = {
-        "nav": ("NAV", "mfapi.in (AMFI data)", "Daily, automatic"),
-        "ter": ("TER breakdown", "AMFI TER file", "Monthly upload"),
-        "factsheet": ("Factsheet values", "AMC factsheet PDFs", "Monthly, automatic"),
+        "nav": ("NAV", "mfapi.in (AMFI data)", "Daily job"),
+        "ter": ("TER breakdown", "AMFI TER page data", "Daily job"),
+        "factsheet": ("Factsheet values", "AMC factsheet PDFs", "Job on 12th, 18th, 25th"),
         "benchmark": ("Benchmark", "niftyindices.com CSV", "Monthly upload"),
     }
     rows = []
@@ -348,7 +345,6 @@ def data_health(conn: sqlite3.Connection, config: AppConfig, today: date) -> pd.
                 "Source": source,
                 "Frequency": frequency,
                 "Data up to": latest_date,
-                "Last loaded": runs.get(dataset),
                 "Status": status,
             }
         )

@@ -140,16 +140,14 @@ def _store(
 ) -> None:
     flags: list[db.Flag] = []
     to_write: list[dict[str, object]] = []
+    names = {f.amfi_code: f.name for f in config.funds}
     for row in rows:
-        try:
-            name = config.fund_by_code(row.amfi_code).name
-        except KeyError:
-            result.notes.append(f"Skipped factsheet values for {row.amfi_code}: not in config")
-            continue
+        name = names.get(row.amfi_code, str(row.amfi_code))  # kept even if not in config
         record = _checked(conn, name, row, result)
         if record is None:
             continue
-        flags += _flags(conn, name, record)
+        if row.amfi_code in names:  # no flags for funds no longer in config
+            flags += _flags(conn, name, record)
         if (
             report_flags
             and record["direct_ber"] is not None
@@ -159,7 +157,7 @@ def _store(
                 f"{name}: BER not checked against AMFI (no AMFI TER on or before {row.as_of})"
             )
         to_write.append(record)
-    if to_write:  # when values were read is kept per row (fetched_at), not in refresh_log
+    if to_write:  # when values were read is kept per row (fetched_at)
         result.rows += db.upsert_factsheet(conn, pd.DataFrame(to_write))
     result.new_flags += db.record_flags(conn, flags)
     if report_flags:
@@ -262,7 +260,7 @@ def _flags(conn: sqlite3.Connection, name: str, record: dict[str, object]) -> li
 
 
 def import_csv(conn: sqlite3.Connection, config: AppConfig, path: Path, today: date) -> LoadResult:
-    """Load the values file kept in the repository (written by the monthly job), with the same
+    """Load the values file kept in the data store (written by the data job), with the same
     checks as a fetch. A malformed line is skipped and reported; the others load."""
     result = LoadResult()
     if not path.exists():
@@ -332,11 +330,3 @@ def _parse_line(raw: dict[str, str]) -> FactsheetRow:
         whole("page"),
         fetched_at,
     )
-
-
-def export_csv(conn: sqlite3.Connection, path: Path) -> int:
-    """Write every stored row to `path`, sorted, so the file diffs cleanly."""
-    frame = db.read_factsheets(conn)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    frame.to_csv(path, index=False, columns=list(db.FACTSHEET_COLUMNS), lineterminator="\n")
-    return len(frame)

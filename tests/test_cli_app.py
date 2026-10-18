@@ -49,7 +49,10 @@ def test_cli_import_benchmark(
         benchmark_csv(growth_series("2025-01-01", "2025-03-31", 0.07, start_value=1000))
     )
     assert cli.main(["import-benchmark", str(csv)]) == 0
-    assert "Rows stored: 64" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "import-benchmark: 64 row(s) stored" in out and "updated benchmark.csv" in out
+    stored = (env.parent / "published" / "benchmark.csv").read_text().splitlines()
+    assert stored[0] == "index_name,date,value" and len(stored) == 65
     bad = tmp_path / "bad.csv"
     bad.write_bytes(b"Date,Close\n")
     assert cli.main(["import-benchmark", str(bad)]) == 1
@@ -61,7 +64,7 @@ def test_cli_refresh_reports_errors(env: Path, monkeypatch: pytest.MonkeyPatch) 
         raise ingest.SourceError("network down")
 
     monkeypatch.setattr(ingest, "fetch_history", broken)
-    assert cli.main(["refresh"]) == 1
+    assert cli.main(["update-data", "--datasets", "nav"]) == 1
 
 
 def _seed(db_file: Path, config_file: Path) -> None:
@@ -133,26 +136,28 @@ def test_app_shows_config_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert any("Config error" in e.value for e in app.error)
 
 
-def test_app_mark_flag_reviewed(env: Path, config_file: Path) -> None:
-    with db.connect(env) as conn:
-        db.record_flags(conn, [db.Flag("nav", "100001", "2026-01-05", "unusual_move", "spike")])
-        flag_id = int(db.read_flags(conn)["id"].iloc[0])
+def test_app_mark_flag_reviewed_is_saved_in_the_store(env: Path) -> None:
+    store = env.parent / "published"
+    store.mkdir()
+    (store / "nav.csv").write_text("amfi_code,date,nav\n100001,2026-01-05,-1.0\n")
     app = AppTest.from_file(str(APP_PATH), default_timeout=60).run()
-    app.button(key=f"flag_{flag_id}").click().run()
+    label = "2026-01-05 · nav 100001 · Alpha Arbitrage Fund: value -1.0 is zero or negative"
+    app.multiselect(key="flag_pick").set_value([label]).run()
+    app.button(key="flag_save").click().run()
     assert not app.exception
     with db.connect(env) as conn:
         assert db.read_flags(conn).empty
+    saved = (env.parent / "published" / "reviewed_flags.csv").read_text()
+    assert "nav,100001,2026-01-05,bad_value" in saved
+    assert any("this machine only (no GITHUB_TOKEN set)" in w.value for w in app.warning)
 
 
-def test_app_refresh_button_shows_result(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def broken(code: int):  # type: ignore[no-untyped-def]
-        raise ingest.SourceError("network down")
-
-    monkeypatch.setattr(ingest, "fetch_history", broken)
+def test_app_data_health_is_read_only(env: Path) -> None:
     app = AppTest.from_file(str(APP_PATH), default_timeout=60).run()
-    next(b for b in app.button if b.label == "Refresh NAV now").click().run()
     assert not app.exception
-    assert any("network down" in e.value for e in app.error)
+    labels = {b.label for b in app.button}
+    assert not labels & {"Refresh NAV now", "Fetch TER from AMFI", "Fetch factsheets now"}
+    assert any("refreshed by a GitHub job" in c.value for c in app.caption)
 
 
 def test_cli_app_uses_same_python(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -73,7 +73,7 @@ class Fund:
     amfi_mf_id: int | None = None  # AMFI fund house id (MF_ID), used to fetch TER
     factsheet_url: str | None = None  # AMC page listing monthly factsheets
     portfolio_url: str | None = None  # AMC page listing monthly portfolio disclosures
-    factsheet: FactsheetSource | None = None  # monthly factsheet PDF, read by fetch-factsheets
+    factsheet: FactsheetSource | None = None  # monthly factsheet PDF, read by the data job
 
 
 @dataclass(frozen=True)
@@ -99,6 +99,10 @@ class Settings:
     factsheet_enabled: bool
     # Fund category -> AMFI TER page "Sub Category" id (strCat), used to fetch TER from AMFI.
     amfi_ter_category_ids: dict[str, int] = field(default_factory=dict)
+    # GitHub repository ("owner/name") and branch that hold the data store. The app saves
+    # benchmark uploads and reviewed flags there, and links to the data refresh job.
+    github_repository: str | None = None
+    github_branch: str = "main"
 
     def active_datasets(self) -> tuple[str, ...]:
         """Datasets in use. TER and factsheet values can be switched off in
@@ -171,7 +175,13 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
         ter_enabled=_require(features, "ter", bool, f"{where}.features"),
         factsheet_enabled=_require(features, "factsheet", bool, f"{where}.features"),
         amfi_ter_category_ids=_category_ids(raw.get("amfi_ter_category_ids", {}), where),
+        github_repository=_repository(raw, where),
+        github_branch=_require(raw, "github_branch", str, where).strip()
+        if "github_branch" in raw
+        else "main",
     )
+    if not settings.github_branch:
+        raise ConfigError(f"{where}: github_branch must not be empty")
     if settings.outlier_multiplier <= 0 or settings.outlier_lookback_days <= 0:
         raise ConfigError(f"{where}: outlier settings must be positive")
     if settings.outlier_min_history <= 0 or settings.max_gap_days <= 0:
@@ -179,6 +189,15 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
     if settings.overlap_tolerance < 0:
         raise ConfigError(f"{where}: overlap_tolerance must not be negative")
     return settings
+
+
+def _repository(raw: dict[str, Any], where: str) -> str | None:
+    if "github_repository" not in raw:
+        return None
+    name: str = _require(raw, "github_repository", str, where).strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", name):
+        raise ConfigError(f"{where}: github_repository must be owner/name, got '{name}'")
+    return name
 
 
 def _category_ids(raw: object, where: str) -> dict[str, int]:

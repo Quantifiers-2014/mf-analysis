@@ -71,10 +71,12 @@ def test_refresh_nav_is_idempotent_and_keeps_reviewed_flags(
     # a one-day spike flags the jump and the reversal the next trading day, for both funds
     assert first.new_flags == 4
     assert set(db.read_flags(conn)["date"]) == {"2025-06-02", "2025-06-03"}
-    flag_id = int(db.read_flags(conn)["id"].iloc[0])
-    db.mark_flag_reviewed(conn, flag_id)
+    flag = db.read_flags(conn).iloc[0]
+    key = (str(flag["dataset"]), str(flag["subject"]), str(flag["date"]), str(flag["check_name"]))
+    db.mark_flags_reviewed(conn, [key])
     second = ingest.refresh_nav(conn, config, fetch)
     assert second.new_flags == 0
+    assert second.rows == 0  # nothing changed
     assert len(db.read_flags(conn)) == 3
     assert conn.execute("SELECT COUNT(*) FROM nav").fetchone()[0] == first.rows
 
@@ -95,10 +97,9 @@ def test_refresh_nav_skips_bad_mapping_and_source_errors(
     assert any("not a Direct Growth plan" in e for e in result.errors)
     assert any("timeout" in e for e in result.errors)
     assert result.rows == 0
-    assert db.read_refresh_log(conn).empty
 
 
-def test_refresh_nav_flags_duplicate_source_dates(
+def test_refresh_nav_notes_duplicate_source_dates(
     conn: db.sqlite3.Connection, config: AppConfig
 ) -> None:
     def fetch(code: int) -> SchemeHistory:
@@ -107,9 +108,8 @@ def test_refresh_nav_flags_duplicate_source_dates(
         return history_for(code, config.fund_by_code(code).isin, series)
 
     result = ingest.refresh_nav(conn, config, fetch)
-    assert result.ok
-    flags = db.read_flags(conn)
-    assert set(flags["check_name"]) == {"duplicate_date"}
+    assert result.ok and db.read_flags(conn).empty
+    assert f"the source lists {END} more than once; the last value is used" in result.notes[0]
 
 
 def test_benchmark_reupload_and_mismatch(conn: db.sqlite3.Connection, config: AppConfig) -> None:

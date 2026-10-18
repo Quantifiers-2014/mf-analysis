@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -66,10 +66,16 @@ CREATE TABLE IF NOT EXISTS validation_flags (
     created_at  TEXT NOT NULL,
     UNIQUE (dataset, subject, date, check_name)
 );
-CREATE TABLE IF NOT EXISTS refresh_log (
-    dataset      TEXT PRIMARY KEY,
-    refreshed_at TEXT NOT NULL,
-    rows         INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS reviewed_flags (
+    dataset     TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    check_name  TEXT NOT NULL,
+    PRIMARY KEY (dataset, subject, date, check_name)
+);
+CREATE TABLE IF NOT EXISTS store_meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
 );
 """
 
@@ -103,7 +109,7 @@ def connect(path: Path = DEFAULT_DB_PATH) -> Iterator[sqlite3.Connection]:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 # ---------- writes ----------
@@ -127,10 +133,17 @@ def upsert_fund(
 
 
 def upsert_nav(conn: sqlite3.Connection, amfi_code: int, series: pd.Series) -> int:
-    """Insert or replace NAVs. `series` is indexed by date with float values."""
+    """Insert NAVs, or update a stored date whose value changed. `series` is indexed by date
+    with float values. Returns the rows actually added or changed."""
     rows = [(amfi_code, d.date().isoformat(), float(v)) for d, v in series.items()]
-    conn.executemany("INSERT OR REPLACE INTO nav (amfi_code, date, nav) VALUES (?, ?, ?)", rows)
-    return len(rows)
+    before = conn.total_changes
+    conn.executemany(
+        """INSERT INTO nav (amfi_code, date, nav) VALUES (?, ?, ?)
+           ON CONFLICT(amfi_code, date) DO UPDATE SET nav=excluded.nav
+           WHERE nav IS NOT excluded.nav""",
+        rows,
+    )
+    return conn.total_changes - before
 
 
 def insert_benchmark(conn: sqlite3.Connection, index_name: str, series: pd.Series) -> int:
@@ -167,12 +180,20 @@ def upsert_ter(conn: sqlite3.Connection, frame: pd.DataFrame) -> int:
         )
         for r in frame[cols].itertuples(index=False)
     ]
+    before = conn.total_changes
     conn.executemany(
-        """INSERT OR REPLACE INTO ter (amfi_code, date, base_ter, brokerage, transaction_cost,
-           statutory_levies, total_ter) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO ter (amfi_code, date, base_ter, brokerage, transaction_cost,
+           statutory_levies, total_ter) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(amfi_code, date) DO UPDATE SET base_ter=excluded.base_ter,
+             brokerage=excluded.brokerage, transaction_cost=excluded.transaction_cost,
+             statutory_levies=excluded.statutory_levies, total_ter=excluded.total_ter
+           WHERE base_ter IS NOT excluded.base_ter OR brokerage IS NOT excluded.brokerage
+             OR transaction_cost IS NOT excluded.transaction_cost
+             OR statutory_levies IS NOT excluded.statutory_levies
+             OR total_ter IS NOT excluded.total_ter""",
         rows,
     )
-    return len(rows)
+    return conn.total_changes - before  # rows added or changed
 
 
 FACTSHEET_COLUMNS = (
@@ -232,20 +253,43 @@ def record_flags(conn: sqlite3.Connection, flags: Iterable[Flag]) -> int:
            (dataset, subject, date, check_name, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)""",
         [(f.dataset, f.subject, f.date, f.check_name, f.detail, _now()) for f in flags],
     )
+    added = conn.total_changes - before
+    return added - apply_reviews(conn)  # a flag already reviewed is not new
+
+
+FLAG_KEY = ("dataset", "subject", "date", "check_name")
+
+
+FlagKey = tuple[str, str, str, str]
+
+
+def mark_flags_reviewed(conn: sqlite3.Connection, keys: Iterable[FlagKey]) -> int:
+    """Record review decisions by (dataset, subject, date, check_name) and apply them.
+    A decision is kept even while its flag is not in the database. Returns flags changed."""
+    conn.executemany(
+        f"INSERT OR IGNORE INTO reviewed_flags ({', '.join(FLAG_KEY)}) VALUES (?, ?, ?, ?)",
+        list(keys),
+    )
+    return apply_reviews(conn)
+
+
+def apply_reviews(conn: sqlite3.Connection) -> int:
+    """Mark open flags that have a review decision as reviewed. Returns flags changed."""
+    before = conn.total_changes
+    conn.execute(
+        """UPDATE validation_flags SET status='reviewed' WHERE status='open' AND EXISTS (
+             SELECT 1 FROM reviewed_flags r WHERE r.dataset=validation_flags.dataset
+               AND r.subject=validation_flags.subject AND r.date=validation_flags.date
+               AND r.check_name=validation_flags.check_name)"""
+    )
     return conn.total_changes - before
 
 
-def mark_flag_reviewed(conn: sqlite3.Connection, flag_id: int) -> None:
-    conn.execute("UPDATE validation_flags SET status='reviewed' WHERE id=?", (flag_id,))
-
-
-def log_refresh(conn: sqlite3.Connection, dataset: str, rows: int) -> None:
-    conn.execute(
-        """INSERT INTO refresh_log (dataset, refreshed_at, rows) VALUES (?, ?, ?)
-           ON CONFLICT(dataset) DO UPDATE SET refreshed_at=excluded.refreshed_at,
-             rows=excluded.rows""",
-        (dataset, _now(), rows),
-    )
+def reviewed_flag_keys(conn: sqlite3.Connection) -> list[FlagKey]:
+    rows = conn.execute(
+        f"SELECT {', '.join(FLAG_KEY)} FROM reviewed_flags ORDER BY {', '.join(FLAG_KEY)}"
+    ).fetchall()
+    return [(str(a), str(b), str(c), str(d)) for a, b, c, d in rows]
 
 
 def _opt(value: float | None) -> float | None:
@@ -321,7 +365,3 @@ def read_flags(conn: sqlite3.Connection, status: str = "open") -> pd.DataFrame:
         conn,
         params=(status,),
     )
-
-
-def read_refresh_log(conn: sqlite3.Connection) -> pd.DataFrame:
-    return pd.read_sql_query("SELECT * FROM refresh_log", conn)

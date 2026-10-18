@@ -12,10 +12,10 @@ CONFIG_ENV = "ARBITRAGE_CONFIG"
 DB_ENV = "ARBITRAGE_DB"
 ENV_FILE_ENV = "ARBITRAGE_ENV_FILE"
 ENV_FILE = DEFAULT_CONFIG_PATH.parents[1] / ".env"
-FACTSHEET_CSV_ENV = "ARBITRAGE_FACTSHEET_CSV"
-# Factsheet values kept in the repository: written by the monthly job, read by the app on start
-# (the database on Streamlit Cloud is not kept between restarts).
-DEFAULT_FACTSHEET_CSV = DEFAULT_CONFIG_PATH.parents[1] / "published" / "factsheet_values.csv"
+DATA_DIR_ENV = "ARBITRAGE_DATA_DIR"
+# The data store: CSV files kept in the repository (NAV, TER, benchmark, factsheet values). The
+# daily GitHub job writes them; the app loads them into the database on start.
+DEFAULT_DATA_DIR = DEFAULT_CONFIG_PATH.parents[1] / "published"
 
 
 def config_path() -> Path:
@@ -26,8 +26,8 @@ def db_path() -> Path:
     return Path(os.environ.get(DB_ENV, DEFAULT_DB_PATH))
 
 
-def factsheet_csv_path() -> Path:
-    return Path(os.environ.get(FACTSHEET_CSV_ENV, DEFAULT_FACTSHEET_CSV))
+def data_dir() -> Path:
+    return Path(os.environ.get(DATA_DIR_ENV, DEFAULT_DATA_DIR))
 
 
 def load_env_file() -> None:

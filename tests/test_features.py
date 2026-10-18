@@ -79,8 +79,9 @@ def test_cli_refuses_switched_off_imports(
     file = tmp_path / "ter.xlsx"
     file.write_bytes(b"x")
     assert cli.main(["import-ter", str(file)]) == 2
-    assert cli.main(["fetch-factsheets"]) == 2
     assert "switched off" in capsys.readouterr().err
+    # the data job skips switched-off datasets without contacting their sources
+    assert cli.main(["update-data", "--datasets", "ter,factsheets"]) == 0
 
 
 def test_app_hides_ter_and_factsheet_sections(

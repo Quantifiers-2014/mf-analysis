@@ -5,7 +5,9 @@ Run:  python -m arbitrage_analyser app
 
 from __future__ import annotations
 
+import sqlite3
 import sys
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -23,16 +25,17 @@ from arbitrage_analyser import (  # noqa: E402
     charts,
     chat_ui,
     db,
-    factsheets,
     ingest,
     metrics,
+    publish,
     services,
+    store,
 )
 from arbitrage_analyser.config import AppConfig, ConfigError, load_config  # noqa: E402
 from arbitrage_analyser.runtime import (  # noqa: E402
     config_path,
+    data_dir,
     db_path,
-    factsheet_csv_path,
     load_env_file,
 )
 
@@ -57,25 +60,29 @@ def _csv_button(frame: pd.DataFrame, filename: str, key: str) -> None:
 
 
 RESULT_KEY = "last_load_result"
+Notice = publish.Notice
 
 
-def _finish_load(label: str, result: ingest.LoadResult) -> None:
+def _finish(label: str, result: ingest.LoadResult | None, notices: list[Notice]) -> None:
     """Keep the outcome for the next run, then rerun so every table shows the new data."""
-    st.session_state[RESULT_KEY] = (label, result)
+    st.session_state[RESULT_KEY] = (label, result, notices)
     st.rerun()
 
 
 def _show_last_result() -> None:
     if RESULT_KEY not in st.session_state:
         return
-    label, result = st.session_state.pop(RESULT_KEY)
+    label, result, notices = st.session_state.pop(RESULT_KEY)
     st.markdown(f"**Last action: {label}**")
-    if result.ok:
-        st.success(f"Stored {result.rows} row(s). New flags: {result.new_flags}.")
-    for error in result.errors:
-        st.error(error)
-    for note in result.notes:
-        st.info(note)
+    if result is not None:
+        if result.ok:
+            st.success(f"Stored {result.rows} row(s). New flags: {result.new_flags}.")
+        for error in result.errors:
+            st.error(error)
+        for note in result.notes:
+            st.info(note)
+    for level, text in notices:
+        getattr(st, level)(text)
 
 
 def _year_picker(key: str, label: str, default: int = services.DEFAULT_YEARS) -> int:
@@ -105,7 +112,7 @@ def fund_comparison_tab(config: AppConfig) -> None:
         st.info("No funds in this category.")
         return
     if not view.nav_as_of:
-        st.info("No NAV data yet. Run a refresh from the Data health tab.")
+        st.info("No NAV data yet: the data refresh job has not run (see Data health).")
     st.caption("Hover over a column name for its definition and as-of date.")
     help_text = services.column_help(config, view)
     column_config = {
@@ -165,9 +172,9 @@ def rolling_returns_tab(config: AppConfig) -> None:
             max_selections=MAX_FUNDS,
             key="roll_funds",
         )
-    with col2:
-        years = _year_picker("roll_window", "Window", default=1)
     with col3:
+        years = _year_picker("roll_window", "Rolling Return Period", default=1)
+    with col4:
         level = float(st.number_input("Above level (%)", value=7.0, step=0.25, key="roll_level"))
     if not chosen:
         st.info("Pick at least one fund.")
@@ -177,9 +184,9 @@ def rolling_returns_tab(config: AppConfig) -> None:
     with db.connect(db_path()) as conn:
         first = services.nav_start(conn, codes)
         if first is None:
-            st.info("No NAV data yet. Run a refresh from the Data health tab.")
+            st.info("No NAV data yet: the data refresh job has not run (see Data health).")
             return
-        with col4:
+        with col2:  # left of the period: the analysis starts here
             start = _start_date_picker(first, date.today())
         chart_data, stats = services.rolling_view(conn, config, codes, years, level, start)
     if chart_data.empty:
@@ -205,79 +212,90 @@ def rolling_returns_tab(config: AppConfig) -> None:
     _csv_button(chart_data, f"rolling_{years}y.csv", "roll_csv")
 
 
-def _upload_section(
+LOAD_KEY = "store_load"
+
+
+class _NotSaved(Exception):
+    """Undo a change in the database that could not be saved to the data store."""
+
+
+def _change_and_save(
     config: AppConfig,
-    label: str,
-    help_text: str,
-    types: list[str],
-    importer: ingest.FileImporter,
-    key: str,
-) -> None:
-    st.markdown(f"**{label}**")
-    st.caption(help_text)
-    upload = st.file_uploader(label, type=types, key=key, label_visibility="collapsed")
-    if upload is not None and st.button(f"Import {label.lower()}", key=f"{key}_go"):
+    change: Callable[[sqlite3.Connection], ingest.LoadResult],
+    file: str,
+    message: str,
+) -> tuple[ingest.LoadResult, list[Notice]]:
+    """Apply `change` and save `file`. When the save fails the change is undone, so the app
+    never shows data that is not in the data store."""
+    damaged = st.session_state[LOAD_KEY].damaged if LOAD_KEY in st.session_state else set()
+    result = ingest.LoadResult()
+    notices: list[Notice] = []
+    try:
         with db.connect(db_path()) as conn:
-            result = importer(conn, config, upload.getvalue())
-        _finish_load(f"Import {label.lower()}", result)
+            result = change(conn)
+            if not result.ok:
+                raise _NotSaved
+            notices = publish.save_store_files(
+                conn, config.settings, data_dir(), [file], message, damaged
+            )
+            if any(level == "error" for level, _ in notices):
+                raise _NotSaved
+    except _NotSaved:
+        if notices:
+            notices.append(("info", "Nothing was changed."))
+    return result, notices
 
 
-def _fetch_ter_section(config: AppConfig) -> None:
-    st.markdown("**TER from AMFI**")
+def _benchmark_upload(config: AppConfig) -> None:
+    st.markdown("**Benchmark CSV**")
     st.caption(
-        "Downloads the Direct Plan BER and Total TER for one month from the AMFI TER page. "
-        "This uses the page's own data request, not a published API, so it can stop working "
-        "if AMFI changes the page; upload the Excel below if it does."
+        "niftyindices.com > Reports > Historical Data > Equity > Strategy Indices > "
+        "NIFTY 50 ARBITRAGE > CSV. Checks: bad values, duplicate dates, gaps, outliers, match "
+        "with stored dates. The data is saved to the repository."
     )
-    left, right = st.columns([1, 3])
-    month = left.text_input(
-        "Month (MM-YYYY)", value=ingest.previous_month(date.today()), key="ter_month"
-    )
-    right.write("")  # aligns the button with the input box
-    if right.button("Fetch TER from AMFI", key="ter_fetch"):
-        with st.spinner(f"Downloading TER for {month}..."), db.connect(db_path()) as conn:
-            result = ingest.fetch_ter(conn, config, month.strip())
-        _finish_load(f"Fetch TER for {month.strip()}", result)
-
-
-def _fetch_factsheets_section(config: AppConfig) -> None:
-    st.markdown("**Factsheet values (AUM, AAUM, turnover, Direct BER)**")
-    st.caption(
-        "Downloads each fund's latest factsheet PDF from the AMC site and reads the values from "
-        "the fund's page. A monthly GitHub job does the same and saves them in the repository. "
-        "Values fetched with this button are kept only until the app restarts."
-    )
-    if st.button("Fetch factsheets now", key="factsheet_fetch"):
-        with st.spinner("Downloading factsheets (1-2 minutes)..."), db.connect(db_path()) as conn:
-            result = factsheets.fetch_factsheets(conn, config, date.today())
-        _finish_load("Fetch factsheets", result)
-
-
-FACTSHEET_FILE_KEY = "factsheet_file_loaded"
-
-
-def _sync_factsheet_file(config: AppConfig) -> None:
-    """Copy the repository's factsheet values into the database, once per session and file
-    version (the database on Streamlit Cloud starts empty after a restart)."""
-    path = factsheet_csv_path()
-    if not config.settings.factsheet_enabled or not path.exists():
+    upload = st.file_uploader("Benchmark CSV", type=["csv"], key="up_bench",
+                              label_visibility="collapsed")  # fmt: skip
+    if upload is None or not st.button("Import benchmark CSV", key="up_bench_go"):
         return
-    version = path.stat().st_mtime
-    if st.session_state.get(FACTSHEET_FILE_KEY) == version:
+    content = upload.getvalue()
+
+    def change(conn: sqlite3.Connection) -> ingest.LoadResult:
+        return ingest.import_benchmark(conn, config, content)
+
+    result, notices = _change_and_save(
+        config, change, store.BENCHMARK_FILE, "Benchmark: upload from the app"
+    )
+    _finish("Import benchmark CSV", result, notices)
+
+
+def _flag_label(flag: tuple[str, str, str, str], detail: str) -> str:
+    return f"{flag[2]} · {flag[0]} {flag[1]} · {detail}"
+
+
+def _flags_section(flags: pd.DataFrame, config: AppConfig) -> None:
+    st.markdown(f"**Open validation flags ({len(flags)})**")
+    if flags.empty:
+        st.caption("No open flags.")
         return
-    with db.connect(db_path()) as conn:
-        result = factsheets.import_csv(conn, config, path, date.today())
-    for error in result.errors:
-        st.warning(f"Factsheet values file: {error}")
-    st.session_state[FACTSHEET_FILE_KEY] = version
+    st.dataframe(flags[["date", "dataset", "subject", "detail"]], hide_index=True, width="stretch")
+    options = {
+        _flag_label(key, str(row.detail)): key
+        for row in flags.itertuples(index=False)
+        for key in [(str(row.dataset), str(row.subject), str(row.date), str(row.check_name))]
+    }
+    picked = st.multiselect(
+        "Mark as reviewed (checked, no action needed)", list(options), key="flag_pick"
+    )
+    if st.button("Save reviewed flags", disabled=not picked, key="flag_save"):
+        keys = [options[p] for p in picked]
 
+        def change(conn: sqlite3.Connection) -> ingest.LoadResult:
+            return ingest.LoadResult(rows=db.mark_flags_reviewed(conn, keys))
 
-def _check_factsheets(config: AppConfig) -> None:
-    """Flags for the latest factsheet values against the TER loaded since (no-op when the flags
-    already exist)."""
-    if config.settings.factsheet_enabled:
-        with db.connect(db_path()) as conn:
-            factsheets.check_latest(conn, config)
+        _, notices = _change_and_save(
+            config, change, store.REVIEWED_FILE, f"Data health: {len(keys)} flag(s) reviewed"
+        )
+        _finish(f"Mark {len(keys)} flag(s) reviewed", None, notices)
 
 
 def data_health_tab(config: AppConfig) -> None:
@@ -287,48 +305,24 @@ def data_health_tab(config: AppConfig) -> None:
     _show_last_result()
     st.markdown("**Data freshness**")
     st.dataframe(health, hide_index=True, width="stretch")
-
-    if st.button("Refresh NAV now"):
-        with st.spinner("Downloading NAV history..."), db.connect(db_path()) as conn:
-            result = ingest.refresh_nav(conn, config)
-        _finish_load("Refresh NAV", result)
-
-    st.markdown(f"**Open validation flags ({len(flags)})**")
-    if flags.empty:
-        st.caption("No open flags.")
-    for flag in flags.head(100).itertuples(index=False):
-        left, right = st.columns([5, 1])
-        left.write(f"{flag.date} · {flag.dataset} · {flag.subject} · {flag.detail}")
-        if right.button("Mark reviewed", key=f"flag_{flag.id}"):
-            with db.connect(db_path()) as conn:
-                db.mark_flag_reviewed(conn, int(flag.id))
-            st.rerun()
-    if len(flags) > 100:
-        st.caption(f"Showing the latest 100 of {len(flags)} open flags.")
-
-    _upload_section(
-        config,
-        "Benchmark CSV",
-        "niftyindices.com > Reports > Historical Data > Equity > Strategy Indices > "
-        "NIFTY 50 ARBITRAGE. Checks: bad values, duplicate dates, gaps, outliers, "
-        "overlap match with stored values.",
-        ["csv"],
-        ingest.import_benchmark,
-        "up_bench",
+    job = publish.actions_url(config.settings)
+    st.caption(
+        "NAV and TER are refreshed by a GitHub job every weekday night, factsheet values on the "
+        "12th, 18th and 25th; the app loads them when it starts."
     )
-    if config.settings.ter_enabled:
-        _fetch_ter_section(config)
-        _upload_section(
-            config,
-            "TER file",
-            "If the fetch fails: amfiindia.com/ter-of-mf-schemes > month, Category 'Hybrid "
-            "Scheme', Sub Category 'Arbitrage Fund' > GO > Download Excel.",
-            ["xlsx", "xls", "csv", "html"],
-            ingest.import_ter,
-            "up_ter",
-        )
-    if config.settings.factsheet_enabled:
-        _fetch_factsheets_section(config)
+    if job:
+        st.link_button("Run the data refresh now (GitHub)", job)
+    _flags_section(flags, config)
+    _benchmark_upload(config)
+
+
+def _load_store(config: AppConfig) -> None:
+    """Load the data store into the database once per version of its files (the database on
+    Streamlit Cloud starts empty after every restart). Problems show on every page view."""
+    result = store.sync(db_path(), config, data_dir(), date.today())
+    st.session_state[LOAD_KEY] = result
+    for error in result.errors:
+        st.warning(f"Data store: {error}")
 
 
 def main() -> None:
@@ -340,8 +334,7 @@ def main() -> None:
     except ConfigError as exc:
         st.error(f"Config error: {exc}")
         st.stop()
-    _sync_factsheet_file(config)
-    _check_factsheets(config)
+    _load_store(config)
     chat_ui.chat_sidebar()
     compare, rolling, health, chat = st.tabs(
         ["Fund comparison", "Rolling returns", "Data health", "Ask the analyst"]

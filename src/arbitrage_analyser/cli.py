@@ -1,12 +1,12 @@
-"""Command line: daily NAV refresh, file imports, config check.
+"""Command line: data refresh job, file imports, config check, app.
 
-python -m arbitrage_analyser refresh
+python -m arbitrage_analyser update-data [--datasets nav,ter,factsheets]
 python -m arbitrage_analyser import-benchmark FILE.csv
-python -m arbitrage_analyser fetch-ter [--month MM-YYYY]
 python -m arbitrage_analyser import-ter FILE
-python -m arbitrage_analyser fetch-factsheets
 python -m arbitrage_analyser check-config
 python -m arbitrage_analyser app
+
+Every data command loads the data store (published/), changes it, and writes it back.
 """
 
 from __future__ import annotations
@@ -15,13 +15,13 @@ import argparse
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
 
-from arbitrage_analyser import db, factsheets, ingest
+from arbitrage_analyser import db, ingest, jobs, store
 from arbitrage_analyser.config import AppConfig, ConfigError, load_config
-from arbitrage_analyser.runtime import config_path, db_path, factsheet_csv_path
+from arbitrage_analyser.runtime import config_path, data_dir, db_path
 
 APP_FILE = Path(__file__).resolve().parent / "app.py"
 
@@ -40,33 +40,40 @@ _IMPORTERS: dict[str, ingest.FileImporter] = {
     "import-ter": ingest.import_ter,
 }
 # Commands that run only when switched on in [settings.features].
-_FEATURE_OF = {"fetch-ter": "ter", "import-ter": "ter", "fetch-factsheets": "factsheet"}
+_FEATURE_OF = {"import-ter": "ter"}
 
 
-def _report(result: ingest.LoadResult) -> int:
-    print(f"Rows stored: {result.rows}. New flags: {result.new_flags}.")
+def _report(label: str, result: ingest.LoadResult) -> int:
+    print(f"{label}: {result.rows} row(s) stored, {result.new_flags} new flag(s).")
     for note in result.notes:
-        print(f"Note: {note}")
+        print(f"  Note: {note}")
     for error in result.errors:
-        print(f"Error: {error}", file=sys.stderr)
+        print(f"  Error: {error}", file=sys.stderr)
     return 0 if result.ok else 1
+
+
+def _datasets(text: str) -> list[str]:
+    chosen = [d.strip() for d in text.split(",") if d.strip()]
+    unknown = sorted(set(chosen) - set(jobs.DATASETS))
+    if unknown or not chosen:
+        raise argparse.ArgumentTypeError(f"choose from {', '.join(jobs.DATASETS)}")
+    return chosen
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="arbitrage-analyser")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("refresh", help="download NAV history for all configured funds")
+    update = commands.add_parser(
+        "update-data", help="fetch new NAV, TER and factsheet data into the data store"
+    )
+    update.add_argument(
+        "--datasets",
+        type=_datasets,
+        default=list(jobs.DAILY),
+        help=f"comma-separated, from {','.join(jobs.DATASETS)} (default: {','.join(jobs.DAILY)})",
+    )
     commands.add_parser("check-config", help="validate config/funds.toml")
     commands.add_parser("app", help="open the app in your browser")
-    fetch_ter = commands.add_parser("fetch-ter", help="download one month of TER from AMFI")
-    fetch_ter.add_argument(
-        "--month", help="MM-YYYY (default: last month)", default=None, metavar="MM-YYYY"
-    )
-    commands.add_parser(
-        "fetch-factsheets",
-        help="read AUM, AAUM, turnover and Direct BER from the latest AMC factsheets "
-        "and update the values file (published/factsheet_values.csv)",
-    )
     for name in _IMPORTERS:
         sub = commands.add_parser(name, help=f"{name.replace('-', ' ')} from a downloaded file")
         sub.add_argument("file", type=Path)
@@ -92,34 +99,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
-    with db.connect(db_path()) as conn:
-        if args.command == "refresh":
-            return _report(ingest.refresh_nav(conn, config))
-        if args.command == "fetch-factsheets":
-            return _fetch_factsheets(conn, config)
-        if args.command == "fetch-ter":
-            month = args.month or ingest.previous_month(date.today())
-            print(f"Fetching TER for {month} from AMFI...")
-            return _report(ingest.fetch_ter(conn, config, month))
-        try:
-            content = args.file.read_bytes()
-        except OSError as exc:
-            print(f"Cannot read {args.file}: {exc}", file=sys.stderr)
-            return 2
-        return _report(_IMPORTERS[args.command](conn, config, content))
-
-
-def _fetch_factsheets(conn: sqlite3.Connection, config: AppConfig) -> int:
-    """Values file -> database, fetch, database -> values file, so the file keeps every month.
-    Exit code 1 when a fund failed or a value was flagged (the values read are still saved)."""
-    path = factsheet_csv_path()
-    loaded = factsheets.import_csv(conn, config, path, date.today())
-    if not loaded.ok:  # a damaged values file: stop before writing over it
-        _report(loaded)
+    if args.command == "update-data":
+        datasets: list[str] = args.datasets
+        return _with_store(
+            config,
+            lambda conn: jobs.fetch(conn, config, date.today(), datasets),
+            store.JOB_FILES,
+        )
+    try:
+        content = args.file.read_bytes()
+    except OSError as exc:
+        print(f"Cannot read {args.file}: {exc}", file=sys.stderr)
         return 2
-    print("Fetching the latest factsheets...")
-    result = factsheets.fetch_factsheets(conn, config, date.today())
-    code = _report(result)
-    rows = factsheets.export_csv(conn, path)
-    print(f"Wrote {rows} row(s) to {path}")
-    return 1 if result.new_flags else code
+    importer = _IMPORTERS[args.command]
+    files = [store.BENCHMARK_FILE] if args.command == "import-benchmark" else ["ter.csv"]
+    return _with_store(config, lambda conn: {args.command: importer(conn, config, content)}, files)
+
+
+def _with_store(
+    config: AppConfig,
+    change: Callable[[sqlite3.Connection], dict[str, ingest.LoadResult]],
+    files: Sequence[str],
+) -> int:
+    """Load the data store, apply `change`, write `files` back.
+
+    Exit codes: 2 when the store cannot be loaded cleanly (nothing is written over it); 1 when a
+    step failed or raised a new flag (what was fetched is still saved); 0 otherwise.
+    """
+    folder = data_dir()
+    with db.connect(db_path()) as conn:
+        loaded = store.load(conn, config, folder, date.today())
+        if not loaded.ok:
+            _report("Data store", loaded)
+            print("Fix the data store files before running again.", file=sys.stderr)
+            return 2
+        results = change(conn)
+        written = store.save(conn, folder, files)
+    code = 0
+    for label, result in results.items():
+        if _report(label, result) or result.new_flags:
+            code = 1
+    print(f"Data store {folder}: " + (f"updated {', '.join(written)}" if written else "no changes"))
+    return code

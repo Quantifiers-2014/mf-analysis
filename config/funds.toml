@@ -6,12 +6,12 @@
 # amfi_code  : AMFI scheme code. Checked against the NAV source on every refresh.
 # isin       : ISIN of the direct growth plan. Must match the NAV source.
 # amfi_mf_id : AMFI fund house id (MF_ID in the TER page request; ids read from the page on
-#              08-Oct-2026). Optional; funds without it are skipped by fetch-ter.
+#              08-Oct-2026). Optional; funds without it get no TER.
 # factsheet_url / portfolio_url : optional links to the AMC pages listing monthly factsheets and
 #              monthly portfolio disclosures, shown in Fund comparison. Checked 08-Oct-2026. Not set
 #              where no fixed public page was found (Kotak factsheet: link changes each month;
 #              ICICI: site could not be checked; Edelweiss portfolio: page asks for folio/PAN).
-# [funds.factsheet] : where the monthly factsheet PDF is, read by fetch-factsheets (AUM, AAUM,
+# [funds.factsheet] : where the monthly factsheet PDF is, read by the data job (AUM, AAUM,
 #              portfolio turnover, Direct Plan BER). Links as seen on the AMC sites, Oct-2026.
 #   link       : the PDF link. Placeholders, filled for the factsheet edition month (newest first:
 #                this month, then the two before): {month} september, {Month} September, {mm} 09,
@@ -42,13 +42,17 @@ outlier_lookback_days = 250      # Trading days used to compute the median daily
 outlier_min_history = 60         # Skip the outlier check until this many days exist
 max_gap_days = 5                 # Flag a gap longer than this many calendar days
 overlap_tolerance = 0.01         # Benchmark re-upload must match stored values within this
+# GitHub repository holding the data store (published/): the app saves benchmark uploads and
+# reviewed flags there (needs GITHUB_TOKEN, see README) and links to the data refresh job.
+github_repository = "Quantifiers-2014/mf-analysis"
+github_branch = "main"
 
 # Switch optional datasets on or off. Off hides their columns, uploads, commands and freshness rows.
 [settings.features]
 ter = true        # BER and Total TER from the AMFI TER file (Direct Plan)
 factsheet = true  # AUM, AAUM, turnover and Direct BER from the AMC factsheets
 
-# AMFI TER page "Sub Category" id per fund category, used by fetch-ter / "Fetch TER from AMFI".
+# AMFI TER page "Sub Category" id per fund category, used by the data job.
 # Seen 08-Oct-2026 in the page's request when Sub Category = Arbitrage Fund (strCat=46).
 [settings.amfi_ter_category_ids]
 Arbitrage = 46

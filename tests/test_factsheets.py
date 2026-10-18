@@ -7,11 +7,9 @@ from pathlib import Path
 
 import pypdfium2
 import pytest
-from streamlit.testing.v1 import AppTest
 
-from arbitrage_analyser import cli, db, factsheets, ingest
+from arbitrage_analyser import db, factsheets, ingest, store
 from arbitrage_analyser.config import AppConfig, ConfigError, FactsheetSource, load_config
-from arbitrage_analyser.runtime import CONFIG_ENV, DB_ENV, FACTSHEET_CSV_ENV
 from arbitrage_analyser.sources import SourceError
 from arbitrage_analyser.sources.factsheet_links import (
     Download,
@@ -28,7 +26,6 @@ from arbitrage_analyser.sources.factsheet_pdf import (
     read_page,
 )
 from tests.conftest import CONFIG_TEXT, factsheet_values, fake_factsheets, ter_rows, xlsx_bytes
-from tests.test_cli_app import APP_PATH
 
 FIXTURES = Path(__file__).parent / "data" / "factsheets"
 SHIPPED = load_config()
@@ -486,9 +483,14 @@ def test_a_damaged_pdf_is_reported_for_that_fund(monkeypatch: pytest.MonkeyPatch
 # ---------- values file ----------
 
 
+def _write_values(conn: db.sqlite3.Connection, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(store.render(conn, store.FACTSHEET_FILE))
+
+
 def _export(conn: db.sqlite3.Connection, config_file: Path, path: Path) -> None:
     assert _fetch(conn, config_file, factsheet_values(turnover=None)).ok
-    assert factsheets.export_csv(conn, path) == 1
+    _write_values(conn, path)
 
 
 def test_values_file_round_trip(
@@ -543,7 +545,7 @@ def test_values_file_lines_are_checked(
     path = tmp_path / "values.csv"
     with db.connect(tmp_path / "source.db") as source:
         assert _fetch(source, config_file, factsheet_values()).ok
-        factsheets.export_csv(source, path)
+        _write_values(source, path)
     text = path.read_text()
     assert old in text
     path.write_text(text.replace(old, new, 1))
@@ -559,7 +561,7 @@ def test_values_file_gets_the_same_checks(
     path = tmp_path / "values.csv"
     with db.connect(tmp_path / "source.db") as source:
         assert _fetch(source, config_file, factsheet_values()).ok
-        factsheets.export_csv(source, path)
+        _write_values(source, path)
     path.write_text(path.read_text().replace(",0.34,", ",9.9,"))
     result = factsheets.import_csv(conn, config, path, TODAY)
     assert result.errors == ["Alpha Arbitrage Fund: BER 9.9 is outside 0-2.5; not stored"]
@@ -578,7 +580,8 @@ def test_values_file_errors(conn: db.sqlite3.Connection, config: AppConfig, tmp_
         + "\n999,2026-09-30,1.0,1.0,,0.3,https://x.in/a.pdf,1,2026-10-18T00:00:00+00:00\n"
     )
     result = factsheets.import_csv(conn, config, unknown, TODAY)
-    assert result.ok and result.notes == ["Skipped factsheet values for 999: not in config"]
+    # a fund no longer in config keeps its history (hidden in the app, not deleted)
+    assert result.ok and result.rows == 1
 
 
 # ---------- download ----------
@@ -623,77 +626,3 @@ def test_http_get(monkeypatch: pytest.MonkeyPatch) -> None:
         factsheet_links.http_get("https://a/huge.pdf")
     with pytest.raises(SourceError, match=r"could not download https://a/down\.pdf"):
         factsheet_links.http_get("https://a/down.pdf")
-
-
-# ---------- command line and app ----------
-
-
-def test_cli_fetch_factsheets_updates_values_file(
-    monkeypatch: pytest.MonkeyPatch,
-    config_file: Path,
-    db_file: Path,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    values_file = tmp_path / "published" / "factsheet_values.csv"
-    monkeypatch.setenv(CONFIG_ENV, str(config_file))
-    monkeypatch.setenv(DB_ENV, str(db_file))
-    monkeypatch.setenv(FACTSHEET_CSV_ENV, str(values_file))
-    download, read = fake_factsheets(factsheet_values())
-    monkeypatch.setattr(factsheets, "download_latest", download)
-    monkeypatch.setattr(factsheets, "read_factsheet", read)
-    assert cli.main(["fetch-factsheets"]) == 0
-    assert "Wrote 1 row(s)" in capsys.readouterr().out
-    assert "75274.99" in values_file.read_text()
-
-    def broken(source: FactsheetSource, today: date) -> Download:
-        raise SourceError("site down")
-
-    monkeypatch.setattr(factsheets, "download_latest", broken)
-    monkeypatch.setenv(DB_ENV, str(tmp_path / "other.db"))  # a fresh runner, as on GitHub
-    assert cli.main(["fetch-factsheets"]) == 1  # fails, but keeps the earlier values
-    assert "75274.99" in values_file.read_text()
-
-    # a flagged value also fails the job; the value is still saved
-    flagged, read = fake_factsheets(factsheet_values(aaum=10.0, as_of=date(2026, 10, 15)))
-    monkeypatch.setattr(factsheets, "download_latest", flagged)
-    monkeypatch.setattr(factsheets, "read_factsheet", read)
-    assert cli.main(["fetch-factsheets"]) == 1
-    assert "Flag: Alpha Arbitrage Fund: AAUM 10.00 Cr" in capsys.readouterr().out
-    assert "2026-10-15" in values_file.read_text()
-
-    # a damaged values file is not written over
-    values_file.write_text("garbage\n")
-    assert cli.main(["fetch-factsheets"]) == 2
-    assert values_file.read_text() == "garbage\n"
-
-
-def _app(monkeypatch: pytest.MonkeyPatch, config_file: Path, db_file: Path, csv: Path) -> AppTest:
-    monkeypatch.setenv(CONFIG_ENV, str(config_file))
-    monkeypatch.setenv(DB_ENV, str(db_file))
-    monkeypatch.setenv(FACTSHEET_CSV_ENV, str(csv))
-    return AppTest.from_file(str(APP_PATH), default_timeout=60).run()
-
-
-def test_app_loads_values_file_and_offers_fetch(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, db_file: Path, tmp_path: Path
-) -> None:
-    with db.connect(tmp_path / "source.db") as conn:
-        assert _fetch(conn, config_file, factsheet_values()).ok
-        factsheets.export_csv(conn, tmp_path / "values.csv")
-    app = _app(monkeypatch, config_file, db_file, tmp_path / "values.csv")
-    assert not app.exception and not app.warning
-    table = app.dataframe[0].value.set_index("Fund")
-    assert table.loc["Alpha Arbitrage Fund", "AUM (Rs Cr)"] == pytest.approx(75274.99)
-    assert table.loc["Alpha Arbitrage Fund", "BER % (factsheet)"] == pytest.approx(0.34)
-    assert any(b.label == "Fetch factsheets now" for b in app.button)
-
-
-def test_app_warns_about_a_bad_values_file(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, db_file: Path, tmp_path: Path
-) -> None:
-    bad = tmp_path / "values.csv"
-    bad.write_text("amfi_code\n1\n")
-    app = _app(monkeypatch, config_file, db_file, bad)
-    assert not app.exception
-    assert "lacks columns" in app.warning[0].value

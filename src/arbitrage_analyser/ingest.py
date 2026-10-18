@@ -65,17 +65,12 @@ def refresh_nav(
             result.errors.extend(mapping_errors)
             continue
 
-        flags: list[db.Flag] = []
         nav = history.nav
-        for day in check_duplicate_dates(nav.index.to_series()):
-            flags.append(
-                db.Flag(
-                    "nav",
-                    str(fund.amfi_code),
-                    day,
-                    "duplicate_date",
-                    f"{fund.name}: the source lists {day} more than once",
-                )
+        duplicates = check_duplicate_dates(nav.index.to_series())
+        if duplicates:  # a source quirk, not a data problem: the last value is kept
+            result.notes.append(
+                f"{fund.name}: the source lists {', '.join(duplicates[:5])} more than once; "
+                "the last value is used"
             )
         nav = nav[~nav.index.duplicated(keep="last")]
 
@@ -90,11 +85,8 @@ def refresh_nav(
         result.rows += db.upsert_nav(conn, fund.amfi_code, nav[nav.index >= start])
 
         stored = db.read_nav(conn, fund.amfi_code)
-        flags.extend(check_series(stored, "nav", str(fund.amfi_code), config.settings, fund.name))
+        flags = check_series(stored, "nav", str(fund.amfi_code), config.settings, fund.name)
         result.new_flags += db.record_flags(conn, flags)
-
-    if result.rows:
-        db.log_refresh(conn, "nav", result.rows)
     return result
 
 
@@ -129,7 +121,6 @@ def import_benchmark(conn: sqlite3.Connection, config: AppConfig, content: bytes
     already_stored = len(upload) - result.rows
     if already_stored:
         result.notes.append(f"{already_stored} row(s) were already stored and matched")
-    db.log_refresh(conn, "benchmark", result.rows)
     return result
 
 
@@ -158,12 +149,14 @@ def fetch_ter(
     config: AppConfig,
     month: str,
     fetch: TerFetcher | None = None,
+    month_in_progress: bool = False,
 ) -> LoadResult:
     """Download one month (MM-YYYY) of TER from AMFI and store it.
 
     AMFI returns one fund house per request, so there is one request per category and
     amfi_mf_id. A failed request is reported; the other fund houses still load.
-    `fetch(month, category_id, mf_id)` defaults to AMFI's page request; tests pass a fake.
+    `month_in_progress`: the current month, which may have no rows yet; that is a note, not an
+    error. `fetch(month, category_id, mf_id)` defaults to AMFI's page request; tests pass a fake.
     """
     if not _MONTH.fullmatch(month):
         return LoadResult(errors=[f"Month must be MM-YYYY, got '{month}'"])
@@ -191,7 +184,7 @@ def fetch_ter(
                 errors.append(f"{', '.join(f.name for f in house)}: {exc}")
 
     if parsed:
-        result = _store_ter(conn, parsed, f"for {month}")
+        result = _store_ter(conn, parsed, f"for {month}", month_in_progress)
     else:
         result = LoadResult()
         if not errors:
@@ -206,17 +199,31 @@ def fetch_ter(
     return result
 
 
-def _store_ter(conn: sqlite3.Connection, parsed: list[TerImport], source: str) -> LoadResult:
+def _store_ter(
+    conn: sqlite3.Connection, parsed: list[TerImport], source: str, empty_ok: bool = False
+) -> LoadResult:
     """Validate and store parsed TER rows. `source` names the data in messages."""
     result = LoadResult()
     rows = pd.concat([p.rows for p in parsed], ignore_index=True)
     unmatched = [name for p in parsed for name in p.unmatched_funds]
     blank = [name for p in parsed for name in p.blank_rows]
     if rows.empty:
+        if empty_ok:
+            result.notes.append(f"No TER values published yet {source}")
+            return result
         result.errors.append(f"No TER values {source} for any configured fund")
         result.notes += _ter_notes(unmatched, blank)
         return result
 
+    result.rows = db.upsert_ter(conn, rows)
+    result.new_flags = db.record_flags(conn, ter_flags(rows))
+    result.notes += _ter_notes(unmatched, blank)
+    return result
+
+
+def ter_flags(rows: pd.DataFrame) -> list[db.Flag]:
+    """Flags for TER rows (amfi_code, date as Timestamp, base_ter, total_ter): values outside
+    0-5% (wrong units) and Total TER below BER."""
     flags: list[db.Flag] = []
     for row in rows.itertuples(index=False):
         day = row.date.date().isoformat()
@@ -238,11 +245,7 @@ def _store_ter(conn: sqlite3.Connection, parsed: list[TerImport], source: str) -
                     "ter", str(row.amfi_code), day, "total_below_base", "Total TER is below BER"
                 )
             )
-    result.rows = db.upsert_ter(conn, rows)
-    result.new_flags = db.record_flags(conn, flags)
-    result.notes += _ter_notes(unmatched, blank)
-    db.log_refresh(conn, "ter", result.rows)
-    return result
+    return flags
 
 
 def _ter_notes(unmatched: list[str], blank: list[str]) -> list[str]:

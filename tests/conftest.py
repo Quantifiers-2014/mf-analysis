@@ -14,7 +14,7 @@ import pytest
 
 from arbitrage_analyser import db, factsheets
 from arbitrage_analyser.config import AppConfig, FactsheetSource, load_config
-from arbitrage_analyser.runtime import FACTSHEET_CSV_ENV
+from arbitrage_analyser.runtime import DATA_DIR_ENV
 from arbitrage_analyser.sources.factsheet_links import Download
 from arbitrage_analyser.sources.factsheet_pdf import FactsheetValues
 from arbitrage_analyser.sources.mfapi import SchemeHistory
@@ -76,9 +76,9 @@ fund_managers = ["B. Manager", { name = "C. Manager", since = "2014-12" }]
 
 
 @pytest.fixture(autouse=True)
-def _no_repo_factsheet_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Keep tests away from the repository's published/factsheet_values.csv."""
-    monkeypatch.setenv(FACTSHEET_CSV_ENV, str(tmp_path / "factsheet_values.csv"))
+def _no_repo_data_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep tests away from the repository data store (published/)."""
+    monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path / "published"))
 
 
 @pytest.fixture

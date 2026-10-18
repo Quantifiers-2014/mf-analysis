@@ -245,7 +245,7 @@ def test_previous_month(today: date, expected: str) -> None:
 # ---------- CLI ----------
 
 
-def test_cli_fetch_ter(
+def test_update_data_fetches_last_and_this_month(
     monkeypatch: pytest.MonkeyPatch,
     config_file: Path,
     db_file: Path,
@@ -254,42 +254,18 @@ def test_cli_fetch_ter(
     monkeypatch.setenv(CONFIG_ENV, str(config_file))
     monkeypatch.setenv(DB_ENV, str(db_file))
     seen: list[tuple[str, int]] = []
+    this_month = date.today().strftime("%m-%Y")
 
     def fake(month: str, category_id: int, mf_id: int) -> list[dict[str, Any]]:
         seen.append((month, mf_id))
+        if month == this_month:
+            return []  # nothing published yet this month: not an error
         return [_row("Alpha Arbitrage Fund", "2026-08-31", "0.33", "2.3")]
 
     monkeypatch.setattr(ingest, "fetch_ter_records", fake)
-    assert cli.main(["fetch-ter", "--month", "08-2026"]) == 0
-    assert "Rows stored: 1" in capsys.readouterr().out
-    assert seen == [("08-2026", 17), ("08-2026", 22)]
-    assert cli.main(["fetch-ter"]) == 0  # default: last month
-    assert seen[-1][0] == ingest.previous_month(date.today())
-
-
-# ---------- app ----------
-
-
-def test_app_fetch_ter_button(
-    monkeypatch: pytest.MonkeyPatch, config_file: Path, db_file: Path
-) -> None:
-    from streamlit.testing.v1 import AppTest
-
-    from tests.test_cli_app import APP_PATH
-
-    monkeypatch.setenv(CONFIG_ENV, str(config_file))
-    monkeypatch.setenv(DB_ENV, str(db_file))
-    seen: list[str] = []
-
-    def fake(month: str, category_id: int, mf_id: int) -> list[dict[str, Any]]:
-        seen.append(month)
-        return [_row("Alpha Arbitrage Fund", "2026-08-31", "0.33", "2.3")]
-
-    monkeypatch.setattr(ingest, "fetch_ter_records", fake)
-    app = AppTest.from_file(str(APP_PATH), default_timeout=60).run()
-    assert app.text_input(key="ter_month").value == ingest.previous_month(date.today())
-    app.text_input(key="ter_month").set_value("08-2026")
-    app.button(key="ter_fetch").click().run()
-    assert not app.exception
-    assert seen == ["08-2026", "08-2026"]
-    assert any("Stored 1 row(s)" in s.value for s in app.success)
+    assert cli.main(["update-data", "--datasets", "ter"]) == 0
+    out = capsys.readouterr().out
+    last = ingest.previous_month(date.today())
+    assert f"ter {last}: 1 row(s) stored" in out
+    assert f"No TER values published yet for {this_month}" in out
+    assert seen == [(last, 17), (last, 22), (this_month, 17), (this_month, 22)]

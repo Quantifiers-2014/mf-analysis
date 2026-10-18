@@ -18,77 +18,87 @@ python -m arbitrage_analyser check-config
 ## First run, in order
 
 ```bash
-cd arbitrage-analyser                       # the unzipped folder (it contains pyproject.toml)
+cd arbitrage-analyser                       # the project folder (it contains pyproject.toml)
 python3 -m venv .venv
 source .venv/bin/activate                   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"                     # "." = this folder; [dev] adds test tools
-python -m arbitrage_analyser refresh        # load NAVs
-python -m arbitrage_analyser import-benchmark ~/Downloads/benchmark.csv
+git pull                                    # the latest data in published/
 python -m arbitrage_analyser app            # opens the app in your browser
 ```
 
-The benchmark can also be uploaded later on the app's Data health tab instead of the
-`import-benchmark` command.
+## Data
 
-## Load data
+All data lives in the **data store**: CSV files in `published/`, kept in the repository. The app
+loads them into its database when it starts (the database is only a cache; on Streamlit Cloud it
+starts empty after every restart). Every line is checked on loading; a bad line is skipped and
+shown as a warning on the screen. Validation flags are worked out again from the data on every
+load; only the flags marked reviewed are stored (`reviewed_flags.csv`).
 
-TER and factsheet values are **on** (`[settings.features]` in `config/funds.toml`). While a
-dataset is off, its columns, uploads, commands and freshness rows are hidden.
+| Data | File | Source | Updated by |
+| --- | --- | --- | --- |
+| NAV, scheme details | `nav.csv`, `funds.csv` | [mfapi.in](https://www.mfapi.in) (AMFI data) | Data job, every weekday night |
+| TER (Direct Plan BER, Total TER) | `ter.csv` | AMFI TER page data request | Data job, every weekday night (last and this month) |
+| AUM, AAUM, turnover, Direct BER | `factsheet_values.csv` | AMC factsheet PDFs | Data job on the 12th, 18th and 25th |
+| Benchmark (NIFTY 50 Arbitrage) | `benchmark.csv` | niftyindices.com CSV | Upload on the Data health tab, monthly |
 
-| Data | How | When |
-| --- | --- | --- |
-| NAV | `python -m arbitrage_analyser refresh` (or the **Refresh NAV now** button) | Daily |
-| Benchmark | Download CSV, then upload on Data health or `import-benchmark FILE` | Monthly |
-| TER | **Fetch TER from AMFI** button (Data health) or `fetch-ter [--month MM-YYYY]`; fallback: download the Excel, then upload or `import-ter FILE` | Monthly |
-| AUM, AAUM, turnover, Direct BER | Automatic: monthly GitHub job (see below), or **Fetch factsheets now** (Data health) / `fetch-factsheets` | Monthly |
+TER and factsheet values can be switched off in `[settings.features]` (`config/funds.toml`);
+their columns, freshness rows and job steps are then skipped.
 
-Where to download:
+**The data job** (`.github/workflows/refresh-data.yml`) runs `python -m arbitrage_analyser
+update-data` on GitHub at 03:15 IST Tuesday to Saturday (after AMFI publishes the day's NAV),
+and with `--datasets nav,ter,factsheets` on the 12th, 18th and 25th. It loads the store, fetches
+new data, writes its own files (`funds.csv`, `nav.csv`, `ter.csv`, `factsheet_values.csv`) and
+commits the ones that changed straight to `main` (one bot commit on days with new data; pull
+before you push). The app writes only `benchmark.csv` and `reviewed_flags.csv`, so the two never
+overwrite each other. A file with a bad line is reported and not written back until it is fixed. The run is marked failed when a source could not
+be read or a new value was flagged; its log names them, and the data that was fetched is still
+saved. Run it by hand from the Data health tab ("Run the data refresh now") or GitHub > Actions >
+Refresh data > Run workflow. The same command works on a laptop; commit `published/` after it.
 
+- **NAV:** full history per fund from `history_start`; only new or changed days change the file.
+  Every run checks that the scheme code, ISIN and "Direct Plan - Growth" in the source match
+  `config/funds.toml`.
+- **TER:** the same request the AMFI page makes when you click GO (not a published API: if AMFI
+  changes the page, the job fails with an error). AMFI returns one fund house per request, so each
+  fund needs its fund house id (`amfi_mf_id`, e.g. Kotak = 17). Fallback when the request breaks:
+  <https://www.amfiindia.com/ter-of-mf-schemes> → month, Category "Hybrid Scheme", Sub Category
+  "Arbitrage Fund" → GO → Download Excel, then `python -m arbitrage_analyser import-ter FILE` and
+  commit `published/ter.csv`.
 - **Benchmark:** <https://www.niftyindices.com/reports/historical-data> → Equity → Strategy
-  Indices → NIFTY 50 ARBITRAGE → pick dates → CSV. The first load can cover 01-Jan-2019 to today;
-  after that, download the last two months each time. Dates already stored must match, or the file is
-  rejected.
-- **TER (automatic):** `python -m arbitrage_analyser fetch-ter` downloads last month's TER for
-  every configured category (`--month 09-2026` for another month). It calls the same request the
-  AMFI page makes when you click GO. That request is not a published API: if AMFI changes the page,
-  the fetch fails with an error and the Excel download below still works. AMFI returns one fund
-  house per request, so each fund needs its fund house id (`amfi_mf_id`, e.g. Kotak = 17) in
-  `config/funds.toml`; funds without one are listed as not fetched. The AMFI sub category id per
-  fund category is in `[settings.amfi_ter_category_ids]` (Arbitrage = 46).
-- **TER (manual):** <https://www.amfiindia.com/ter-of-mf-schemes> → Financial Year, Month → Category
-  "Hybrid Scheme", Sub Category "Arbitrage Fund", Mutual Fund "All" → GO → Download Excel. The app
-  reads the Direct Plan BER and Total TER (one row per day). Funds missing from the file, or days
-  with blank values, are skipped and listed after the import; their columns stay blank.
-- **Factsheet values (automatic):** `python -m arbitrage_analyser fetch-factsheets` downloads
-  each fund's latest factsheet PDF from the AMC site (`[funds.factsheet]` in `config/funds.toml`),
-  finds the fund's page and reads AUM, AAUM, portfolio turnover and the Direct Plan BER. See
-  "Factsheet values" below.
+  Indices → NIFTY 50 ARBITRAGE → dates → CSV, then upload on the Data health tab. The first upload
+  can cover 01-Jan-2019 to today; after that, the last two months. Dates already stored must
+  match, or the file is rejected. The app saves the file to GitHub (needs the token below); on a
+  laptop `python -m arbitrage_analyser import-benchmark FILE` and a commit do the same.
 
-NAV comes from [mfapi.in](https://www.mfapi.in), a free unofficial API that republishes AMFI data.
-AMFI's own NAV history download allows only 90 days per request. Every refresh checks that the
-scheme code, ISIN and "Direct Plan - Growth" in the source match `config/funds.toml`.
+### Saving from the app to GitHub (benchmark uploads, reviewed flags)
+
+The app commits `published/benchmark.csv` and `published/reviewed_flags.csv` with a GitHub token.
+One-time setup:
+
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** →
+   Generate new token. Resource owner: Quantifiers-2014 (or the repository owner); Repository
+   access: **Only select repositories** → mf-analysis; Permissions → Repository → **Contents:
+   Read and write**. Set an expiry (e.g. 1 year) and copy the token.
+2. Streamlit Cloud → the app → Settings → Secrets, add `GITHUB_TOKEN = "github_pat_..."` and save.
+   For a laptop, add the same line to `.env` (git-ignored).
+3. The repository and branch are `github_repository` and `github_branch` in `config/funds.toml`.
+
+Each save is one commit; Streamlit Cloud then restarts the app with the new file. A save is
+based on the version the app loaded, so it is refused (and nothing is lost) if the file changed on
+GitHub meanwhile: wait for the restart and try again. Without a token the app saves the file on
+its own machine only and says so.
 
 ## Factsheet values
 
 AUM, AAUM, portfolio turnover and the Direct Plan BER have no free API, so they are read from the
 AMC factsheet PDFs.
 
-- **Where they are kept:** `published/factsheet_values.csv` in the repository, one row per fund
-  per month, with the PDF link and page. The first rows (Sep-2026; Nippon Aug-2026) were read with these
-  rules from factsheets downloaded by hand on 18-Oct-2026. The app loads it on start, so the values survive
-  Streamlit Cloud restarts (its database starts empty). The Factsheet column opens the PDF at the
-  fund's page.
-- **Monthly job:** `.github/workflows/factsheets.yml` runs on the 12th, 18th and 25th, and on
-  demand (GitHub > Actions > "Factsheet values" > Run workflow). It fetches the last two months of
-  AMFI TER (for the BER check), reads the factsheets, and commits the values file to `main` only
-  when a value changed, so `main` must accept pushes from `github-actions[bot]`. The run is marked
-  failed when a fund's factsheet could not be read or a value was flagged; the step log names
-  them, and the other values are still saved. If an AMC site blocks GitHub, run
-  `python -m arbitrage_analyser fetch-factsheets` on a laptop and commit
-  `published/factsheet_values.csv` through a pull request.
-- **Values file checks:** every line is checked when loaded (dates, link, page, the value ranges
-  below); a bad line is skipped and shown as a warning in the app. The app also re-checks the
-  latest values against any AMFI TER fetched later, so a BER mismatch shows as a flag.
+- **Where they are kept:** `published/factsheet_values.csv`, one row per fund per month, with the
+  PDF link and page; the Factsheet column opens the PDF at the fund's page. The first rows
+  (Sep-2026; Nippon Aug-2026) were read with these rules from factsheets downloaded by hand on
+  18-Oct-2026.
+- **When:** the data job reads them on the 12th, 18th and 25th, after the day's TER (so the BER
+  check has AMFI data), or by hand with "Also read the AMC factsheets" ticked.
 - **Finding the file:** a link with placeholders is tried for this month's edition, then the two
   before; Edelweiss PDF names carry an upload timestamp, so its listing page is read instead.
 - **Accuracy rules** (`sources/factsheet_pdf.py`, tested on the Sep-2026 factsheets of all 8 AMCs
@@ -165,18 +175,6 @@ Put a Google Gemini API key (free from <https://aistudio.google.com/apikey>) in 
 - Limits for now: no web search or file uploads, the last 30 messages of a conversation are sent
   with each question, and answers are text and tables only (no charts yet).
 
-## Daily NAV refresh
-
-macOS/Linux (cron, 8:30 pm daily):
-
-```
-30 20 * * * cd /path/to/arbitrage-analyser && .venv/bin/python -m arbitrage_analyser refresh
-```
-
-Windows: Task Scheduler → daily task running
-`C:\path\to\arbitrage-analyser\.venv\Scripts\python.exe -m arbitrage_analyser refresh`
-with "Start in" set to the project folder. A missed day is caught up on the next run.
-
 ## Configuration
 
 `config/funds.toml` holds the fund list, category, AMFI code, ISIN, exit load, fund managers, and
@@ -184,9 +182,9 @@ the TER name match, and where each fund's factsheet is. `[settings.features]` sw
 and factsheet datasets on or off. It also holds the validation settings (outlier multiplier, gap days, overlap
 tolerance) and freshness thresholds. Run `check-config` after editing.
 
-Override paths with `ARBITRAGE_CONFIG`, `ARBITRAGE_DB` (default database: `data/arbitrage.db`)
-and `ARBITRAGE_FACTSHEET_CSV` (default: `published/factsheet_values.csv`).
-Back up by copying the `.db` file.
+Override paths with `ARBITRAGE_CONFIG`, `ARBITRAGE_DB` (default database: `data/arbitrage.db`, a
+cache that can be deleted at any time) and `ARBITRAGE_DATA_DIR` (default data store: `published/`).
+All data is in `published/` (and its git history); the database needs no backup.
 
 ## Data checks
 
@@ -215,15 +213,18 @@ src/arbitrage_analyser/
                            factsheet download (factsheet_links.py) and PDF rules (factsheet_pdf.py)
   validation.py            data checks
   metrics.py               point-to-point, rolling returns, tracking difference
-  ingest.py                fetch/parse -> validate -> store
+  ingest.py                fetch/parse -> validate -> database
+  store.py                 data store: published/*.csv <-> database
+  jobs.py                  the data job (update-data)
+  publish.py               saving store files to GitHub from the app
   factsheets.py            factsheet values: fetch, checks, values file
   services.py              screen read models (reusable by a future API or chatbot)
   cli.py                   command line
   app.py                   Streamlit UI
   chat_ui.py               "Ask the analyst" chat tab
   agent/                   AI agent: tools, prompt, Claude loop, chat storage, Langfuse tracing
-published/                factsheet values kept in the repository (written by the monthly job)
-.github/workflows/         monthly factsheet job
+published/                the data store: CSV files with all data (written by the data job)
+.github/workflows/         the data job (refresh-data.yml)
 tests/                     unit and app tests
 ```
 
