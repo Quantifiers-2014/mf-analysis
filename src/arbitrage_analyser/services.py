@@ -13,6 +13,8 @@ from arbitrage_analyser import db, metrics
 from arbitrage_analyser.config import AppConfig, Fund
 
 BENCHMARK_LABEL = "Benchmark"
+AMFI_BER = "BER % (AMFI)"
+FACTSHEET_BER = "BER % (factsheet)"
 DEFAULT_YEARS = 3  # period selected on the Fund comparison screen when it opens
 
 
@@ -40,7 +42,7 @@ class ComparisonView:
     nav_as_of: dict[str, date]
     td_as_of: dict[str, date]
     ter_as_of: dict[str, str]
-    aaum_quarter: dict[str, str]
+    factsheet_as_of: dict[str, str]
 
 
 def fund_comparison(
@@ -55,7 +57,7 @@ def fund_comparison(
     settings = config.settings
     stored = db.read_funds(conn).set_index("amfi_code")
     ter = db.read_latest_ter(conn).set_index("amfi_code")
-    aaum = db.read_latest_aaum(conn).set_index("amfi_code")
+    sheet = db.read_latest_factsheet(conn).set_index("amfi_code")
     bench = db.read_benchmark(conn, settings.benchmark_name)
     flagged_codes = set(db.read_flags(conn, "open")["subject"])
 
@@ -63,7 +65,7 @@ def fund_comparison(
     nav_as_of: dict[str, date] = {}
     td_as_of: dict[str, date] = {}
     ter_as_of: dict[str, str] = {}
-    aaum_quarter: dict[str, str] = {}
+    factsheet_as_of: dict[str, str] = {}
     for fund in config.funds_in(category):
         code = fund.amfi_code
         nav = db.read_nav(conn, code)
@@ -85,21 +87,42 @@ def fund_comparison(
             return_column(years): _pct(metrics.point_to_point(nav, years)),
             td_column(years): _pct(td),
         }
-        if settings.aaum_enabled:
-            row["AUM (Rs Cr)"] = aaum["aaum_crore"].get(code)
-            if code in aaum.index:
-                aaum_quarter[fund.name] = str(aaum.at[code, "quarter_end"])
+        has_sheet = settings.factsheet_enabled and code in sheet.index
+        if settings.factsheet_enabled:
+            row["AUM (Rs Cr)"] = _value(sheet, code, "aum_crore")
+            row["AAUM (Rs Cr)"] = _value(sheet, code, "aaum_crore")
+            if has_sheet:
+                factsheet_as_of[fund.name] = str(sheet.at[code, "as_of"])
         if settings.ter_enabled:
-            row["BER %"] = ter["base_ter"].get(code)
+            row[AMFI_BER] = ter["base_ter"].get(code)
+        if settings.factsheet_enabled:
+            row[FACTSHEET_BER] = _value(sheet, code, "direct_ber")
+        if settings.ter_enabled:
             row["Total TER %"] = ter["total_ter"].get(code)
             if code in ter.index:
                 ter_as_of[fund.name] = str(ter.at[code, "date"])
+        if settings.factsheet_enabled:
+            row["Turnover"] = _value(sheet, code, "turnover")
         row["Exit load"] = _exit_load_text(fund)
-        row["Factsheet"] = fund.factsheet_url
+        row["Factsheet"] = (
+            f"{sheet.at[code, 'source_url']}#page={int(sheet.at[code, 'page'])}"
+            if has_sheet
+            else fund.factsheet_url
+        )
         row["Monthly portfolio"] = fund.portfolio_url
         row["Flag"] = "; ".join(reasons)
         rows.append(row)
-    return ComparisonView(pd.DataFrame(rows), years, nav_as_of, td_as_of, ter_as_of, aaum_quarter)
+    return ComparisonView(
+        pd.DataFrame(rows), years, nav_as_of, td_as_of, ter_as_of, factsheet_as_of
+    )
+
+
+def _value(frame: pd.DataFrame, code: int, column: str) -> object:
+    """frame[column] for the fund, or None (also for a stored blank)."""
+    if code not in frame.index:
+        return None
+    value = frame.at[code, column]
+    return None if pd.isna(value) else value
 
 
 def column_help(config: AppConfig, view: ComparisonView) -> dict[str, str]:
@@ -121,21 +144,37 @@ def column_help(config: AppConfig, view: ComparisonView) -> dict[str, str]:
             f"Fund P2P return minus {config.settings.benchmark_name} P2P return over the same "
             f"{period}, as of {td}."
         ),
-        "BER %": f"Base Expense Ratio, Direct Plan, from AMFI. TER as of {ter}.",
+        AMFI_BER: f"Base Expense Ratio, Direct Plan, from AMFI. TER as of {ter}.",
         "Total TER %": (
             "Total expense ratio, Direct Plan: BER + brokerage + transaction cost + statutory "
             f"levies (incl. GST), from AMFI. TER as of {ter}."
         ),
-        "Factsheet": "AMC page listing the monthly factsheets.",
+        "Factsheet": (
+            "Latest factsheet PDF, opening at the fund's page. Before the first factsheet "
+            "fetch: the AMC page listing the factsheets."
+        ),
         "Monthly portfolio": "AMC page listing the monthly portfolio disclosures.",
         "Flag": (
             f"Exit load above {config.settings.exit_load_flag_above_pct:g}%, or an open data "
             "flag (see Data health)."
         ),
     }
-    if view.aaum_quarter:
-        quarter = as_of_text(view.aaum_quarter)
-        help_text["AUM (Rs Cr)"] = f"Average AUM for the quarter ending {quarter}."
+    if config.settings.factsheet_enabled:
+        sheet = as_of_text(view.factsheet_as_of) or "no factsheet data yet"
+        source = f"from the fund's page in the AMC factsheet, as of {sheet}"
+        help_text |= {
+            "AUM (Rs Cr)": f"Assets under management at month-end, {source}.",
+            "AAUM (Rs Cr)": f"Average assets under management for the month, {source}.",
+            FACTSHEET_BER: (
+                f"Base Expense Ratio, Direct Plan, as printed {source}. Compare with "
+                f"{AMFI_BER}; AMCs differ on whether GST is included."
+            ),
+            "Turnover": (
+                f"Portfolio turnover as printed {source}. AMCs use different units (a ratio, or % "
+                "where printed) and bases (equity only, or gross exposure incl. derivatives), "
+                "so values are not comparable across AMCs."
+            ),
+        }
     return help_text
 
 
@@ -271,26 +310,29 @@ def _stats_row(
 def data_health(conn: sqlite3.Connection, config: AppConfig, today: date) -> pd.DataFrame:
     """Spec screen 3: freshness of each dataset, judged by the latest data date it holds.
 
-    For NAV the least up-to-date configured fund decides, so one stale fund is not hidden.
+    For NAV and factsheet values the least up-to-date configured fund decides.
     """
-    per_fund = dict(conn.execute("SELECT amfi_code, MAX(date) FROM nav GROUP BY amfi_code"))
-    nav_dates = [per_fund[f.amfi_code] for f in config.funds if f.amfi_code in per_fund]
-    funds_without_nav = len(config.funds) - len(nav_dates)
+    nav_date, nav_missing = _least_recent(conn, "nav", "date", [f.amfi_code for f in config.funds])
+    sheet_funds = [f.amfi_code for f in config.funds if f.factsheet is not None]
+    sheet_date, sheet_missing = _least_recent(conn, "factsheet", "as_of", sheet_funds)
+    missing = {"nav": nav_missing, "factsheet": sheet_missing}
     latest = {
-        "nav": min(nav_dates) if nav_dates else None,
+        "nav": nav_date,
         "ter": _scalar(conn, "SELECT MAX(date) FROM ter"),
-        "aaum": _scalar(conn, "SELECT MAX(quarter_end) FROM aaum"),
+        "factsheet": sheet_date,
         "benchmark": _scalar(
             conn,
             "SELECT MAX(date) FROM benchmark WHERE index_name=?",
             (config.settings.benchmark_name,),
         ),
     }
-    runs = db.read_refresh_log(conn).set_index("dataset")["refreshed_at"]
+    runs = db.read_refresh_log(conn).set_index("dataset")["refreshed_at"].to_dict()
+    # factsheet values also arrive from the repository's values file: show when they were read
+    runs["factsheet"] = _scalar(conn, "SELECT MAX(fetched_at) FROM factsheet")
     meta = {
         "nav": ("NAV", "mfapi.in (AMFI data)", "Daily, automatic"),
         "ter": ("TER breakdown", "AMFI TER file", "Monthly upload"),
-        "aaum": ("Average AUM", "AMFI AAUM file", "Quarterly upload"),
+        "factsheet": ("Factsheet values", "AMC factsheet PDFs", "Monthly, automatic"),
         "benchmark": ("Benchmark", "niftyindices.com CSV", "Monthly upload"),
     }
     rows = []
@@ -298,8 +340,8 @@ def data_health(conn: sqlite3.Connection, config: AppConfig, today: date) -> pd.
         label, source, frequency = meta[dataset]
         latest_date = latest[dataset]
         status = freshness_status(latest_date, today, config, dataset)
-        if dataset == "nav" and nav_dates and funds_without_nav:
-            status = f"Missing for {funds_without_nav} fund(s)"
+        if latest_date is not None and missing.get(dataset):
+            status = f"Missing for {missing[dataset]} fund(s)"
         rows.append(
             {
                 "Dataset": label,
@@ -311,6 +353,18 @@ def data_health(conn: sqlite3.Connection, config: AppConfig, today: date) -> pd.
             }
         )
     return pd.DataFrame(rows)
+
+
+def _least_recent(
+    conn: sqlite3.Connection, table: str, column: str, codes: Sequence[int]
+) -> tuple[str | None, int]:
+    """(Latest date of the least up-to-date fund, number of funds with no rows), so one stale
+    fund is not hidden by the others."""
+    per_fund = dict(
+        conn.execute(f"SELECT amfi_code, MAX({column}) FROM {table} GROUP BY amfi_code")
+    )
+    dates = [per_fund[c] for c in codes if c in per_fund]
+    return (min(dates) if dates else None), len(codes) - len(dates)
 
 
 def freshness_status(latest: str | None, today: date, config: AppConfig, dataset: str) -> str:

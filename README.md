@@ -32,16 +32,15 @@ The benchmark can also be uploaded later on the app's Data health tab instead of
 
 ## Load data
 
-TER is **on**; Average AUM is **switched off** (`[settings.features]` in `config/funds.toml`).
-While a dataset is off, its columns, uploads, import commands and freshness rows are hidden. Set
-`aaum = true` to turn AAUM back on; its code and tests stay in place.
+TER and factsheet values are **on** (`[settings.features]` in `config/funds.toml`). While a
+dataset is off, its columns, uploads, commands and freshness rows are hidden.
 
 | Data | How | When |
 | --- | --- | --- |
 | NAV | `python -m arbitrage_analyser refresh` (or the **Refresh NAV now** button) | Daily |
 | Benchmark | Download CSV, then upload on Data health or `import-benchmark FILE` | Monthly |
 | TER | **Fetch TER from AMFI** button (Data health) or `fetch-ter [--month MM-YYYY]`; fallback: download the Excel, then upload or `import-ter FILE` | Monthly |
-| Average AUM | Download per fund house from AMFI, then upload or `import-aaum FILE` | Quarterly |
+| AUM, AAUM, turnover, Direct BER | Automatic: monthly GitHub job (see below), or **Fetch factsheets now** (Data health) / `fetch-factsheets` | Monthly |
 
 Where to download:
 
@@ -60,12 +59,58 @@ Where to download:
   "Hybrid Scheme", Sub Category "Arbitrage Fund", Mutual Fund "All" → GO → Download Excel. The app
   reads the Direct Plan BER and Total TER (one row per day). Funds missing from the file, or days
   with blank values, are skipped and listed after the import; their columns stay blank.
-- **Average AUM:** <https://www.amfiindia.com/aum-data/average-aum> → Schemewise, Categorywise,
-  one fund house, financial year, quarter → Go → Excel. Repeat for each fund house.
+- **Factsheet values (automatic):** `python -m arbitrage_analyser fetch-factsheets` downloads
+  each fund's latest factsheet PDF from the AMC site (`[funds.factsheet]` in `config/funds.toml`),
+  finds the fund's page and reads AUM, AAUM, portfolio turnover and the Direct Plan BER. See
+  "Factsheet values" below.
 
 NAV comes from [mfapi.in](https://www.mfapi.in), a free unofficial API that republishes AMFI data.
 AMFI's own NAV history download allows only 90 days per request. Every refresh checks that the
 scheme code, ISIN and "Direct Plan - Growth" in the source match `config/funds.toml`.
+
+## Factsheet values
+
+AUM, AAUM, portfolio turnover and the Direct Plan BER have no free API, so they are read from the
+AMC factsheet PDFs.
+
+- **Where they are kept:** `published/factsheet_values.csv` in the repository, one row per fund
+  per month, with the PDF link and page. The first rows (Sep-2026; Nippon Aug-2026) were read with these
+  rules from factsheets downloaded by hand on 18-Oct-2026. The app loads it on start, so the values survive
+  Streamlit Cloud restarts (its database starts empty). The Factsheet column opens the PDF at the
+  fund's page.
+- **Monthly job:** `.github/workflows/factsheets.yml` runs on the 12th, 18th and 25th, and on
+  demand (GitHub > Actions > "Factsheet values" > Run workflow). It fetches the last two months of
+  AMFI TER (for the BER check), reads the factsheets, and commits the values file to `main` only
+  when a value changed, so `main` must accept pushes from `github-actions[bot]`. The run is marked
+  failed when a fund's factsheet could not be read or a value was flagged; the step log names
+  them, and the other values are still saved. If an AMC site blocks GitHub, run
+  `python -m arbitrage_analyser fetch-factsheets` on a laptop and commit
+  `published/factsheet_values.csv` through a pull request.
+- **Values file checks:** every line is checked when loaded (dates, link, page, the value ranges
+  below); a bad line is skipped and shown as a warning in the app. The app also re-checks the
+  latest values against any AMFI TER fetched later, so a BER mismatch shows as a flag.
+- **Finding the file:** a link with placeholders is tried for this month's edition, then the two
+  before; Edelweiss PDF names carry an upload timestamp, so its listing page is read instead.
+- **Accuracy rules** (`sources/factsheet_pdf.py`, tested on the Sep-2026 factsheets of all 8 AMCs
+  in `tests/data/factsheets`):
+  - The fund's page is the one whose heading (largest text) is `page_title`; pages that only
+    mention the fund, such as fund-of-fund pages, are skipped. Two such pages showing AUM is an
+    error.
+  - Each value is taken next to its printed label, by position on the page. A value that is not
+    found, or not clear (two % values on the Direct BER row), stays blank: nothing is estimated
+    or carried over from another PDF. A re-read of the same month that lacks a stored value
+    keeps the stored row.
+  - The as-of date is the one printed on the page, never the file name: Nippon's "September"
+    factsheet holds August data and ABSL's "October" one holds September data.
+  - Turnover is kept as printed. AMCs use different units (a ratio, or %) and bases (equity, or
+    gross exposure including derivatives), so it is not comparable across AMCs.
+- **Checks:** AUM and AAUM above 0 and below Rs 10 lakh crore, BER between 0 and 2.5%, else the
+  value is not stored and an error is shown. Flags: AAUM outside 0.5-2 times AUM; factsheet BER
+  more than 0.02 points from the AMFI BER on the same date, with and without 18% GST (Kotak
+  prints BER with GST). Older data never replaces newer.
+- **When an AMC changes its factsheet:** the fetch reports the fund (no page titled ..., a value
+  not found), the other funds still load. Update `[funds.factsheet]` (link, page title, turnover
+  labels); a layout change may need a rule change and a new fixture page.
 
 ## Run the app
 
@@ -135,10 +180,12 @@ with "Start in" set to the project folder. A missed day is caught up on the next
 ## Configuration
 
 `config/funds.toml` holds the fund list, category, AMFI code, ISIN, exit load, fund managers, and
-the TER name match. `[settings.features]` switches the TER and AAUM datasets on or off. It also holds the validation settings (outlier multiplier, gap days, overlap
+the TER name match, and where each fund's factsheet is. `[settings.features]` switches the TER
+and factsheet datasets on or off. It also holds the validation settings (outlier multiplier, gap days, overlap
 tolerance) and freshness thresholds. Run `check-config` after editing.
 
-Override paths with `ARBITRAGE_CONFIG` and `ARBITRAGE_DB` (default database: `data/arbitrage.db`).
+Override paths with `ARBITRAGE_CONFIG`, `ARBITRAGE_DB` (default database: `data/arbitrage.db`)
+and `ARBITRAGE_FACTSHEET_CSV` (default: `published/factsheet_values.csv`).
 Back up by copying the `.db` file.
 
 ## Data checks
@@ -151,6 +198,8 @@ Back up by copying the `.db` file.
 | Benchmark | Zero/negative values or duplicate dates | File rejected |
 | Benchmark | Stored dates must match within 0.01 | File rejected |
 | TER | Value outside 0–5%, Total TER below BER | Flag |
+| Factsheet | AUM/AAUM not above 0 or above Rs 10 lakh crore; BER outside 0–2.5% | Value not stored, error shown |
+| Factsheet | AAUM outside 0.5–2x AUM; BER more than 0.02 from AMFI BER (with and without GST) | Flag |
 
 Daily moves are divided by the calendar days since the previous value, so weekend accrual does not
 trigger flags. A flag is reviewed on the Data health screen; a reviewed flag stays reviewed.
@@ -162,15 +211,19 @@ config/funds.toml          fund list and settings
 src/arbitrage_analyser/
   config.py                load and validate config
   db.py                    SQLite schema, reads, writes
-  sources/                 mfapi.in and AMFI TER fetch; benchmark, TER, AAUM file parsers
+  sources/                 mfapi.in and AMFI TER fetch; benchmark and TER file parsers;
+                           factsheet download (factsheet_links.py) and PDF rules (factsheet_pdf.py)
   validation.py            data checks
   metrics.py               point-to-point, rolling returns, tracking difference
   ingest.py                fetch/parse -> validate -> store
+  factsheets.py            factsheet values: fetch, checks, values file
   services.py              screen read models (reusable by a future API or chatbot)
   cli.py                   command line
   app.py                   Streamlit UI
   chat_ui.py               "Ask the analyst" chat tab
   agent/                   AI agent: tools, prompt, Claude loop, chat storage, Langfuse tracing
+published/                factsheet values kept in the repository (written by the monthly job)
+.github/workflows/         monthly factsheet job
 tests/                     unit and app tests
 ```
 
@@ -185,6 +238,10 @@ mypy
 ## Known limits (v0)
 
 - The TER parser follows the AMFI Excel for Sep-2026 (checked 08-Oct-2026; a copy is in
-  `tests/data`). The AAUM parser follows the layout seen on 07-Oct-2026. A changed AMFI layout gives a
-  clear error naming the missing column; the parser then needs updating.
+  `tests/data`). A changed AMFI layout gives a clear error naming the missing column; the parser
+  then needs updating.
+- Factsheet links follow the AMC sites as seen in Oct-2026, but have not yet been downloaded by the
+  job (this was built without access to the AMC sites).
+  The SBI and Invesco links are used without the `?sfvrsn=...` the sites add; if they fail, the
+  first job run shows it.
 - NAV relies on mfapi.in. If it goes away, add another fetcher in `sources/`; the rest is unchanged.

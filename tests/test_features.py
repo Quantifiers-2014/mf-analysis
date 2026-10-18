@@ -1,4 +1,4 @@
-"""TER and AAUM switched off in [settings.features]."""
+"""TER and factsheet values switched off in [settings.features]."""
 
 from datetime import date
 from pathlib import Path
@@ -13,17 +13,17 @@ from tests.conftest import CONFIG_TEXT, CONFIG_TEXT_OFF
 from tests.test_cli_app import APP_PATH
 
 
-def test_shipped_config_has_ter_on_and_aaum_off() -> None:
+def test_shipped_config_has_ter_and_factsheets_on() -> None:
     settings = load_config().settings
-    assert (settings.ter_enabled, settings.aaum_enabled) == (True, False)
-    assert settings.active_datasets() == ("nav", "ter", "benchmark")
+    assert (settings.ter_enabled, settings.factsheet_enabled) == (True, True)
+    assert settings.active_datasets() == ("nav", "ter", "factsheet", "benchmark")
 
 
 def test_active_datasets(config_file: Path, config_file_off: Path) -> None:
     assert load_config(config_file).settings.active_datasets() == (
         "nav",
         "ter",
-        "aaum",
+        "factsheet",
         "benchmark",
     )
     assert load_config(config_file_off).settings.active_datasets() == ("nav", "benchmark")
@@ -33,11 +33,11 @@ def test_active_datasets(config_file: Path, config_file_off: Path) -> None:
     ("text", "message"),
     [
         (
-            CONFIG_TEXT.replace("[settings.features]\nter = true\naaum = true\n", ""),
+            CONFIG_TEXT.replace("[settings.features]\nter = true\nfactsheet = true\n", ""),
             "missing 'features'",
         ),
         (CONFIG_TEXT.replace("ter = true", "ter = 1"), "wrong type"),
-        (CONFIG_TEXT.replace("aaum = true\n", ""), "missing 'aaum'"),
+        (CONFIG_TEXT.replace("factsheet = true\n", ""), "missing 'factsheet'"),
     ],
 )
 def test_features_validation(tmp_path: Path, text: str, message: str) -> None:
@@ -47,7 +47,7 @@ def test_features_validation(tmp_path: Path, text: str, message: str) -> None:
         load_config(path)
 
 
-def test_services_hide_ter_and_aaum(config_file_off: Path, db_file: Path) -> None:
+def test_services_hide_ter_and_factsheet_columns(config_file_off: Path, db_file: Path) -> None:
     config = load_config(config_file_off)
     with db.connect(db_file) as conn:
         table = services.fund_comparison(conn, config, "Arbitrage").table
@@ -79,11 +79,11 @@ def test_cli_refuses_switched_off_imports(
     file = tmp_path / "ter.xlsx"
     file.write_bytes(b"x")
     assert cli.main(["import-ter", str(file)]) == 2
-    assert cli.main(["import-aaum", str(file)]) == 2
+    assert cli.main(["fetch-factsheets"]) == 2
     assert "switched off" in capsys.readouterr().err
 
 
-def test_app_hides_ter_and_aaum_uploads(
+def test_app_hides_ter_and_factsheet_sections(
     monkeypatch: pytest.MonkeyPatch, config_file_off: Path, db_file: Path
 ) -> None:
     monkeypatch.setenv(CONFIG_ENV, str(config_file_off))
@@ -93,7 +93,7 @@ def test_app_hides_ter_and_aaum_uploads(
     headings = [m.value for m in app.markdown]
     assert "**Benchmark CSV**" in headings
     assert "**TER file**" not in headings
-    assert "**AAUM file**" not in headings
+    assert not any(h.startswith("**Factsheet values") for h in headings)
 
 
 def test_text_fixtures_differ_only_in_features() -> None:

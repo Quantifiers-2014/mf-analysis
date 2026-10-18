@@ -19,9 +19,22 @@ if sys.path[0] != _SRC:
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from arbitrage_analyser import charts, chat_ui, db, ingest, metrics, services  # noqa: E402
+from arbitrage_analyser import (  # noqa: E402
+    charts,
+    chat_ui,
+    db,
+    factsheets,
+    ingest,
+    metrics,
+    services,
+)
 from arbitrage_analyser.config import AppConfig, ConfigError, load_config  # noqa: E402
-from arbitrage_analyser.runtime import config_path, db_path, load_env_file  # noqa: E402
+from arbitrage_analyser.runtime import (  # noqa: E402
+    config_path,
+    db_path,
+    factsheet_csv_path,
+    load_env_file,
+)
 
 MAX_FUNDS = len(charts.FUND_COLOURS)
 PCT = st.column_config.NumberColumn(format="%.2f")
@@ -104,6 +117,10 @@ def fund_comparison_tab(config: AppConfig) -> None:
         "AUM (Rs Cr)": st.column_config.NumberColumn(
             format="%,.0f", help=help_text.get("AUM (Rs Cr)")
         ),
+        "AAUM (Rs Cr)": st.column_config.NumberColumn(
+            format="%,.0f", help=help_text.get("AAUM (Rs Cr)")
+        ),
+        "Turnover": st.column_config.TextColumn(width="medium", help=help_text.get("Turnover")),
         "Fund manager": st.column_config.TextColumn(width="medium"),
         "Factsheet": st.column_config.LinkColumn(display_text="Open", help=help_text["Factsheet"]),
         "Monthly portfolio": st.column_config.LinkColumn(
@@ -223,6 +240,46 @@ def _fetch_ter_section(config: AppConfig) -> None:
         _finish_load(f"Fetch TER for {month.strip()}", result)
 
 
+def _fetch_factsheets_section(config: AppConfig) -> None:
+    st.markdown("**Factsheet values (AUM, AAUM, turnover, Direct BER)**")
+    st.caption(
+        "Downloads each fund's latest factsheet PDF from the AMC site and reads the values from "
+        "the fund's page. A monthly GitHub job does the same and saves them in the repository. "
+        "Values fetched with this button are kept only until the app restarts."
+    )
+    if st.button("Fetch factsheets now", key="factsheet_fetch"):
+        with st.spinner("Downloading factsheets (1-2 minutes)..."), db.connect(db_path()) as conn:
+            result = factsheets.fetch_factsheets(conn, config, date.today())
+        _finish_load("Fetch factsheets", result)
+
+
+FACTSHEET_FILE_KEY = "factsheet_file_loaded"
+
+
+def _sync_factsheet_file(config: AppConfig) -> None:
+    """Copy the repository's factsheet values into the database, once per session and file
+    version (the database on Streamlit Cloud starts empty after a restart)."""
+    path = factsheet_csv_path()
+    if not config.settings.factsheet_enabled or not path.exists():
+        return
+    version = path.stat().st_mtime
+    if st.session_state.get(FACTSHEET_FILE_KEY) == version:
+        return
+    with db.connect(db_path()) as conn:
+        result = factsheets.import_csv(conn, config, path, date.today())
+    for error in result.errors:
+        st.warning(f"Factsheet values file: {error}")
+    st.session_state[FACTSHEET_FILE_KEY] = version
+
+
+def _check_factsheets(config: AppConfig) -> None:
+    """Flags for the latest factsheet values against the TER loaded since (no-op when the flags
+    already exist)."""
+    if config.settings.factsheet_enabled:
+        with db.connect(db_path()) as conn:
+            factsheets.check_latest(conn, config)
+
+
 def data_health_tab(config: AppConfig) -> None:
     with db.connect(db_path()) as conn:
         health = services.data_health(conn, config, date.today())
@@ -270,16 +327,8 @@ def data_health_tab(config: AppConfig) -> None:
             ingest.import_ter,
             "up_ter",
         )
-    if config.settings.aaum_enabled:
-        _upload_section(
-            config,
-            "AAUM file",
-            "AMFI > Average AUM: Schemewise, Categorywise, one fund house, one quarter, "
-            "Excel export.",
-            ["xlsx", "xls", "csv", "html"],
-            ingest.import_aaum,
-            "up_aaum",
-        )
+    if config.settings.factsheet_enabled:
+        _fetch_factsheets_section(config)
 
 
 def main() -> None:
@@ -291,6 +340,8 @@ def main() -> None:
     except ConfigError as exc:
         st.error(f"Config error: {exc}")
         st.stop()
+    _sync_factsheet_file(config)
+    _check_factsheets(config)
     chat_ui.chat_sidebar()
     compare, rolling, health, chat = st.tabs(
         ["Fund comparison", "Rolling returns", "Data health", "Ask the analyst"]

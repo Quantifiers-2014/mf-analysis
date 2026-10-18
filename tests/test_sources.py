@@ -6,12 +6,11 @@ import requests
 
 from arbitrage_analyser.config import DEFAULT_CONFIG_PATH, AppConfig, load_config
 from arbitrage_analyser.sources import SourceError
-from arbitrage_analyser.sources.aaum import parse_aaum
 from arbitrage_analyser.sources.benchmark import parse_benchmark_csv
 from arbitrage_analyser.sources.mfapi import fetch_history, parse_history
 from arbitrage_analyser.sources.tables import read_grid, to_number
 from arbitrage_analyser.sources.ter import parse_ter
-from tests.conftest import aaum_rows, benchmark_csv, growth_series, ter_rows, xlsx_bytes
+from tests.conftest import benchmark_csv, growth_series, ter_rows, xlsx_bytes
 
 MFAPI_PAYLOAD = {
     "meta": {
@@ -239,52 +238,6 @@ def test_parse_ter_layout_errors(config: AppConfig) -> None:
         parse_ter(xlsx_bytes(no_direct), config.funds)
     with pytest.raises(SourceError, match="scheme name"):
         parse_ter(xlsx_bytes([["foo", "bar"]]), config.funds)
-
-
-# ---------- AAUM ----------
-
-
-def test_parse_aaum_converts_lakhs_to_crore(config: AppConfig) -> None:
-    content = xlsx_bytes(
-        aaum_rows(
-            [
-                (100001, "Alpha Arbitrage Fund - Direct Plan - Growth Option", 2125927.9),
-                (999999, "Other fund", 10.0),
-            ]
-        )
-    )
-    parsed = parse_aaum(content, config.funds)
-    assert parsed.quarter_end == pd.Timestamp("2026-09-30")
-    assert parsed.funds_found == ["Alpha Arbitrage Fund"]
-    assert parsed.rows["aaum_crore"].iloc[0] == pytest.approx(21259.279)
-
-
-def test_parse_aaum_html_export(config: AppConfig) -> None:
-    rows = aaum_rows(
-        [(100002, "Beta - Direct - Growth", 150000.0)],
-        title="AAUM for the quarter of January - March 2027 (Rs in Crore)",
-    )
-    cells = "".join(
-        "<tr>" + "".join(f"<td>{'' if v is None else v}</td>" for v in row) + "</tr>"
-        for row in rows
-    )
-    parsed = parse_aaum(f"<html><table>{cells}</table></html>".encode(), config.funds)
-    assert parsed.quarter_end == pd.Timestamp("2027-03-31")
-    assert parsed.rows["aaum_crore"].iloc[0] == pytest.approx(150000.0)
-
-
-@pytest.mark.parametrize(
-    ("title", "message"),
-    [
-        ("Average AUM (Rs in Lakhs)", "does not name the quarter"),
-        ("AAUM for the quarter of July - Smarch 2026 (Rs in Lakhs)", "unknown month"),
-        ("AAUM for the quarter of July - September 2026", "lakhs or crore"),
-    ],
-)
-def test_parse_aaum_title_errors(config: AppConfig, title: str, message: str) -> None:
-    content = xlsx_bytes(aaum_rows([(100001, "Alpha", 1.0)], title=title))
-    with pytest.raises(SourceError, match=message):
-        parse_aaum(content, config.funds)
 
 
 def test_parse_benchmark_ignores_dashes_in_unused_columns() -> None:
