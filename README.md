@@ -1,8 +1,10 @@
-# Arbitrage Fund Analyser (v0)
+# Mutual Fund Analyser (v0)
 
-An internal tool that compares Indian arbitrage mutual funds on returns, costs and size, against the
-NIFTY 50 Arbitrage index. Built to the agreed v0 spec: three screens (Fund comparison, Rolling
+An internal tool that compares Indian mutual funds on returns, costs and size, against the
+benchmark index. Built to the agreed v0 spec: three screens (Fund comparison, Rolling
 returns, Data health), SQLite storage, and data-quality checks on every load.
+
+<img width="1432" height="684" alt="image" src="https://github.com/user-attachments/assets/59bf638c-daf9-4359-beab-525f57509516" />
 
 ## Setup
 
