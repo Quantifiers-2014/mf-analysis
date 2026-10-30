@@ -78,8 +78,10 @@ fund_managers = ["B. Manager", { name = "C. Manager", since = "2014-12" }]
 
 @pytest.fixture(autouse=True)
 def _no_repo_data_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Keep tests away from the repository data store (published/)."""
+    """Keep tests away from the repository data store (published/) and the hosted chat
+    database (tests that need Postgres set TEST_DATABASE_URL, see test_chat_store.py)."""
     monkeypatch.setenv(DATA_DIR_ENV, str(tmp_path / "published"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
 @pytest.fixture

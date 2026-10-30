@@ -185,9 +185,19 @@ Put a Google Gemini API key (free from <https://aistudio.google.com/apikey>) in 
 - Free tiers allow only a few requests per minute and per day, and one question takes 2 to 4
   requests. On the free tier Google may use prompts to improve its products, so do not type
   confidential information into the chat.
-- Conversations are saved in `data/chat.db` (override with `ARBITRAGE_CHAT_DB`), under the name
-  in the sidebar, so you can reopen them later. Each answer is stored with the tool calls
-  behind it, model, tokens, time taken, Langfuse trace id and any thumbs up/down.
+- Conversations are saved under the name in the sidebar, so you can reopen them later. Each
+  answer is stored with the tool calls behind it, model, tokens, time taken, Langfuse trace id
+  and any thumbs up/down. The sidebar shows where they are saved.
+  - **Live app:** in a hosted Postgres database (Neon, free plan), so they survive app reboots.
+    Streamlit Cloud → the app → Settings → Secrets: `DATABASE_URL = "postgresql://..."`, using
+    Neon's **pooled** connection string (host name has `-pooler`). Without it, chats are lost
+    whenever Streamlit Cloud restarts the app.
+  - **On a laptop:** `data/chat.db` (override with `ARBITRAGE_CHAT_DB`); or the hosted database
+    if `DATABASE_URL` is in `.env`.
+  - **Tests:** a temporary SQLite file. Postgres tests run when `TEST_DATABASE_URL` points to a
+    throwaway database (its chat tables are dropped).
+  - If the database cannot be reached (e.g. Neon waking from sleep), the chat says so and
+    the question is not sent; try again in a minute.
 - Langfuse tracing (optional): create a free account at <https://langfuse.com/cloud>, make a
   project, and put its API keys in `.env` (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and
   `LANGFUSE_BASE_URL` for the US cloud or a self-hosted server). Traces follow Langfuse's best

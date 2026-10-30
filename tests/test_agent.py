@@ -229,24 +229,6 @@ def test_history_merges_unanswered_questions_and_starts_with_user() -> None:
 # ---------- storage ----------
 
 
-def test_store_round_trip_and_feedback(tmp_path: Path) -> None:
-    with store.connect(tmp_path / "chat.db") as conn:
-        cid = store.create_conversation(conn, "asha", "  Which fund   is cheapest? ")
-        store.add_message(conn, cid, "user", "Which fund is cheapest?")
-        mid = store.add_message(
-            conn, cid, "assistant", "Alpha.", tool_calls=[{"name": "list_funds"}], trace_id="tr1"
-        )
-        store.set_feedback(conn, mid, 1)
-        store.set_feedback(conn, mid, 0)  # changing your mind overwrites
-
-        assert store.list_conversations(conn, "asha")[0]["title"] == "Which fund is cheapest?"
-        assert store.list_conversations(conn, "someone else") == []
-        messages = store.read_messages(conn, cid)
-        assert [m.role for m in messages] == ["user", "assistant"]
-        assert messages[1].tool_calls == [{"name": "list_funds"}] and messages[1].trace_id == "tr1"
-        assert store.read_feedback(conn, mid) == 0
-
-
 # ---------- chat screen ----------
 
 

@@ -34,6 +34,13 @@ def _error_text(exc: Exception) -> str:
     return f"Sorry, I couldn't answer that: {exc}"
 
 
+def _storage_error(exc: Exception) -> str:
+    return (
+        f"The conversation could not be saved or loaded ({type(exc).__name__}: {exc}). "
+        "If the hosted database was asleep, try again in a minute."
+    )
+
+
 def chat_sidebar() -> None:
     with st.sidebar:
         st.header("Ask the analyst")
@@ -45,8 +52,12 @@ def chat_sidebar() -> None:
         )
         if st.button("New conversation", icon=":material/add:", width="stretch"):
             st.session_state[CONVERSATION_KEY] = None
-        with store.connect() as conn:
-            conversations = store.list_conversations(conn, user.strip() or "local")
+        try:
+            with store.connect() as conn:
+                conversations = store.list_conversations(conn, user.strip() or "local")
+        except Exception as exc:  # e.g. the hosted database cannot be reached
+            st.warning(f"Saved conversations could not be loaded: {exc}")
+            conversations = []
         if conversations:
             st.caption("Recent conversations")
         current = st.session_state.get(CONVERSATION_KEY)
@@ -58,6 +69,7 @@ def chat_sidebar() -> None:
         info = providers.selected_provider()
         model = os.environ.get(providers.MODEL_ENV) or (info.default_model if info else "")
         st.caption(f"Model: {info.label} · {model}" if info else "Model: not set up")
+        st.caption(f"Conversations saved on: {store.storage_label()}")
         st.caption(
             f"Langfuse tracing: on ({tracing.environment()})"
             if tracing.enabled()
@@ -78,10 +90,16 @@ def _show_message(message: store.StoredMessage) -> None:
                     st.json(call["output"], expanded=False)
         rating = st.feedback("thumbs", key=f"fb_{message.id}")
         if rating is not None:
-            with store.connect() as conn:
-                if store.read_feedback(conn, message.id) != rating:
-                    store.set_feedback(conn, message.id, int(rating))
-                    tracing.score_feedback(message.trace_id, int(rating))
+            try:
+                with store.connect() as conn:
+                    changed = store.read_feedback(conn, message.id) != rating
+                    if changed:
+                        store.set_feedback(conn, message.id, int(rating))
+            except Exception as exc:  # the hosted database cannot be reached
+                st.error(_storage_error(exc))
+                return
+            if changed:
+                tracing.score_feedback(message.trace_id, int(rating))
 
 
 def chat_tab(config: AppConfig) -> None:
@@ -96,8 +114,12 @@ def chat_tab(config: AppConfig) -> None:
     conversation_id = st.session_state.get(CONVERSATION_KEY)
     history: list[store.StoredMessage] = []
     if conversation_id:
-        with store.connect() as conn:
-            history = store.read_messages(conn, conversation_id)
+        try:
+            with store.connect() as conn:
+                history = store.read_messages(conn, conversation_id)
+        except Exception as exc:  # the hosted database cannot be reached
+            st.error(_storage_error(exc))
+            return
     else:
         st.caption(
             "Ask about the funds in the database. Answers come only from the stored data, with "
@@ -111,11 +133,15 @@ def chat_tab(config: AppConfig) -> None:
         return
     with st.chat_message("user"):
         st.markdown(question)
-    with store.connect() as conn:
-        if not conversation_id:
-            conversation_id = store.create_conversation(conn, user_id, question)
-            st.session_state[CONVERSATION_KEY] = conversation_id
-        store.add_message(conn, conversation_id, "user", question)
+    try:
+        with store.connect() as conn:
+            if not conversation_id:
+                conversation_id = store.create_conversation(conn, user_id, question)
+            store.add_message(conn, conversation_id, "user", question)
+    except Exception as exc:  # nothing saved: the question is not sent either
+        st.error(_storage_error(exc))
+        return
+    st.session_state[CONVERSATION_KEY] = conversation_id
 
     with st.chat_message("assistant"), st.spinner("Looking at the data..."):
         try:
@@ -132,6 +158,17 @@ def chat_tab(config: AppConfig) -> None:
         except Exception as exc:  # API, network or key problems: show them, keep the question
             st.error(_error_text(exc))
             return
+    try:
+        _save_answer(conversation_id, result)
+    except Exception as exc:  # the answer is shown once, but not saved
+        with st.chat_message("assistant"):
+            st.markdown(result.answer or "(no answer)")
+        st.error(_storage_error(exc))
+        return
+    st.rerun()
+
+
+def _save_answer(conversation_id: str, result: agent.TurnResult) -> None:
     with store.connect() as conn:
         store.add_message(
             conn,
@@ -146,4 +183,3 @@ def chat_tab(config: AppConfig) -> None:
             latency_ms=result.latency_ms,
             trace_id=result.trace_id,
         )
-    st.rerun()

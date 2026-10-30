@@ -25,6 +25,8 @@ dependencies = [
     "anthropic>=1.0",
     "langfuse>=4.0",
     "python-dotenv>=1.0",
+    # chat history in a hosted Postgres database (Neon) when DATABASE_URL is set
+    "psycopg[binary,pool]>=3.2",
 ]
 
 [project.optional-dependencies]
