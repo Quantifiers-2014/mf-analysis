@@ -4,6 +4,8 @@
 #   NAV and TER: every weekday night (03:15 IST Tue-Sat, after AMFI publishes the day's NAV).
 #   Factsheet values: also on the 12th, 18th and 25th (factsheets come 1-3 weeks after month end).
 #   By hand: Actions tab > "Refresh data" > Run workflow (choose whether to read factsheets).
+#   Factsheet text for the chatbot: chunked with the factsheet values; chunks are embedded with
+#   Mistral on every run when the MISTRAL_API_KEY repository secret is set.
 #
 # The run is marked failed when a source could not be read or a new value was flagged; the step
 # log names them, and what was fetched is still saved. Commits go straight to main, so main must
@@ -48,6 +50,7 @@ jobs:
         id: fetch
         env:
           FACTSHEETS: ${{ github.event.schedule == '30 3 12,18,25 * *' || inputs.factsheets }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
         run: |
           datasets=nav,ter
           if [ "$FACTSHEETS" = "true" ]; then datasets=nav,ter,factsheets; fi
@@ -58,7 +61,7 @@ jobs:
       # so a commit from the app meanwhile cannot conflict. Retries if main moved on.
       - name: Save changed data
         run: |
-          for file in funds nav ter factsheet_values; do
+          for file in funds nav ter factsheet_values factsheet_chunks factsheet_embeddings; do
             if [ -f "published/$file.csv" ]; then git add -- "published/$file.csv"; fi
           done
           if git diff --cached --quiet; then

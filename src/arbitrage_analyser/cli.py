@@ -4,6 +4,7 @@ python -m arbitrage_analyser update-data [--datasets nav,ter,factsheets]
 python -m arbitrage_analyser import-benchmark FILE.csv
 python -m arbitrage_analyser import-ter FILE
 python -m arbitrage_analyser check-config
+python -m arbitrage_analyser eval-search [--modes keyword,semantic,hybrid] [--answers]
 python -m arbitrage_analyser app
 
 Every data command loads the data store (published/), changes it, and writes it back.
@@ -73,6 +74,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=f"comma-separated, from {','.join(jobs.DATASETS)} (default: {','.join(jobs.DAILY)})",
     )
     commands.add_parser("check-config", help="validate config/funds.toml")
+    evals_cmd = commands.add_parser(
+        "eval-search", help="score the chatbot's factsheet search on the test set (evals/)"
+    )
+    evals_cmd.add_argument(
+        "--modes",
+        default="keyword",
+        help="comma-separated, from keyword,semantic,hybrid (semantic and hybrid need "
+        "MISTRAL_API_KEY)",
+    )
+    evals_cmd.add_argument(
+        "--answers", action="store_true", help="also ask the chatbot each question (model key)"
+    )
+    evals_cmd.add_argument(
+        "--pause", type=float, default=10.0, help="seconds between chatbot questions"
+    )
     commands.add_parser("app", help="open the app in your browser")
     for name in _IMPORTERS:
         sub = commands.add_parser(name, help=f"{name.replace('-', ' ')} from a downloaded file")
@@ -89,6 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "check-config":
         print(f"Config OK: {len(config.funds)} funds in {config.categories()}")
         return 0
+    if args.command == "eval-search":
+        return run_evals(config, args.modes, args.answers, args.pause)
 
     feature = _FEATURE_OF.get(args.command)
     if feature and feature not in config.settings.active_datasets():
@@ -114,6 +132,39 @@ def main(argv: Sequence[str] | None = None) -> int:
     importer = _IMPORTERS[args.command]
     files = [store.BENCHMARK_FILE] if args.command == "import-benchmark" else ["ter.csv"]
     return _with_store(config, lambda conn: {args.command: importer(conn, config, content)}, files)
+
+
+def run_evals(config: AppConfig, modes_text: str, answers: bool, pause: float) -> int:
+    """Score search (and answers) on the test set, in a scratch database: the fund data from
+    the data store, the factsheet chunks from the test PDFs. Writes a report to evals/results/."""
+    import tempfile
+
+    from arbitrage_analyser import evals
+    from arbitrage_analyser.config import SEARCH_MODES
+
+    modes = [m.strip() for m in modes_text.split(",") if m.strip()]
+    if not modes or set(modes) - set(SEARCH_MODES):
+        print(f"--modes: choose from {', '.join(SEARCH_MODES)}", file=sys.stderr)
+        return 2
+    try:
+        eval_set = evals.load_set(config)
+    except (OSError, KeyError, ValueError) as exc:
+        print(f"Test set error: {exc}", file=sys.stderr)
+        return 2
+    today = date.today()
+    with tempfile.TemporaryDirectory() as scratch, db.connect(Path(scratch) / "evals.db") as conn:
+        store.load(conn, config, data_dir(), today)
+        notes = evals.build_index(conn, eval_set)
+        if set(modes) & {"semantic", "hybrid"}:
+            notes += evals.embed_index(conn, config)
+        reports = [evals.score_search(conn, config, eval_set, mode, today) for mode in modes]
+        if answers:
+            evals.score_answers(reports[0], eval_set, evals.chatbot_asker(conn, config), pause)
+    for report in reports:
+        print("\n".join(evals.summary(report)))
+    path = evals.write_report(reports, notes, today)
+    print(f"Report: {path}")
+    return 0
 
 
 def _with_store(

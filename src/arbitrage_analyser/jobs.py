@@ -9,7 +9,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import date
 
-from arbitrage_analyser import factsheets, ingest
+from arbitrage_analyser import embeddings, factsheets, ingest
 from arbitrage_analyser.config import AppConfig
 from arbitrage_analyser.ingest import LoadResult
 
@@ -26,7 +26,8 @@ def fetch(
 ) -> dict[str, LoadResult]:
     """Fetch the chosen datasets into the database (already loaded from the store). TER covers
     last month and this month (TER can change mid-month); factsheets run after TER so their BER
-    is checked against it. Datasets switched off in config are skipped."""
+    is checked against it. Factsheet chunks without an embedding are embedded on every run.
+    Datasets switched off in config are skipped."""
     unknown = sorted(set(datasets) - set(DATASETS))
     if unknown:
         raise ValueError(f"unknown datasets {unknown}; choose from {list(DATASETS)}")
@@ -45,4 +46,7 @@ def fetch(
     if "ter" in datasets and "factsheet" in active:
         # the latest factsheet BER against the TER just fetched (also for unchanged factsheets)
         results["factsheet BER check"] = LoadResult(new_flags=factsheets.check_latest(conn, config))
+    if "factsheet" in active:
+        # every run, so chunks left without an embedding (no key yet, Mistral down) catch up
+        results["factsheet embeddings"] = embeddings.update(conn, config)
     return results

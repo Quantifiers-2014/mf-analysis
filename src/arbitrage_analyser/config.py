@@ -103,6 +103,10 @@ class Settings:
     # benchmark uploads and reviewed flags there, and links to the data refresh job.
     github_repository: str | None = None
     github_branch: str = "main"
+    # Chatbot factsheet search ([settings.factsheet_search]): how chunks are found, and the
+    # Mistral model that makes the embeddings kept for search by meaning.
+    search_mode: str = "keyword"
+    embedding_model: str = "mistral-embed"
 
     def active_datasets(self) -> tuple[str, ...]:
         """Datasets in use. TER and factsheet values can be switched off in
@@ -179,6 +183,7 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
         github_branch=_require(raw, "github_branch", str, where).strip()
         if "github_branch" in raw
         else "main",
+        **_search_settings(raw.get("factsheet_search", {}), where),
     )
     if not settings.github_branch:
         raise ConfigError(f"{where}: github_branch must not be empty")
@@ -189,6 +194,27 @@ def _parse_settings(raw: dict[str, Any]) -> Settings:
     if settings.overlap_tolerance < 0:
         raise ConfigError(f"{where}: overlap_tolerance must not be negative")
     return settings
+
+
+SEARCH_MODES = ("keyword", "semantic", "hybrid")
+
+
+def _search_settings(raw: object, where: str) -> dict[str, str]:
+    where = f"{where}.factsheet_search"
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a table")
+    found: dict[str, str] = {}
+    if "mode" in raw:
+        mode = _require(raw, "mode", str, where).strip()
+        if mode not in SEARCH_MODES:
+            raise ConfigError(f"{where}: mode must be one of {', '.join(SEARCH_MODES)}")
+        found["search_mode"] = mode
+    if "embedding_model" in raw:
+        model = _require(raw, "embedding_model", str, where).strip()
+        if not model:
+            raise ConfigError(f"{where}: embedding_model must not be empty")
+        found["embedding_model"] = model
+    return found
 
 
 def _repository(raw: dict[str, Any], where: str) -> str | None:

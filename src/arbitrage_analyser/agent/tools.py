@@ -7,6 +7,7 @@ cite where a figure came from and how fresh it is. Tools never write to the data
 from __future__ import annotations
 
 import math
+import re
 import sqlite3
 from collections.abc import Callable
 from datetime import date
@@ -14,9 +15,10 @@ from typing import Any
 
 import pandas as pd
 
-from arbitrage_analyser import db, metrics, services
+from arbitrage_analyser import db, factsheet_search, metrics, services
 from arbitrage_analyser.config import AppConfig
 
+FACTSHEET_SOURCE = "fund page of the AMC's monthly factsheet (PDF)"
 NAV_SOURCE = "mfapi.in (republishes AMFI NAV data), stored in the analyser database"
 CONFIG_SOURCE = "config/funds.toml (fund list maintained by the team)"
 MAX_CODES = 20
@@ -137,6 +139,36 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "whenever a question needs TER, AUM or benchmark data."
         ),
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "search_factsheets",
+        "description": (
+            "Search the text of the funds' factsheet pages (AMC monthly factsheets) for what "
+            "only the factsheet states: investment objective, use of derivatives or hedging, "
+            "fund managers and experience, exit load wording, expense ratio, portfolio "
+            "turnover, top holdings, sector allocation, risk measures, riskometer. Returns the "
+            "best-matching extracts with fund, data date (as_of), page and link; an empty list "
+            "means the factsheet does not state it. Extracts for the user's question may "
+            "already be in the message: call this for other wording, funds or months."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to look for, in words."},
+                "amfi_codes": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Optional: only these funds. Default: funds named in the "
+                    "query, else all funds.",
+                },
+                "month": {
+                    "type": "string",
+                    "description": "Optional factsheet data month, YYYY-MM (e.g. 2026-08 for "
+                    "data as of 31-Aug-2026). Default: each fund's latest factsheet.",
+                },
+            },
+            "required": ["query"],
+        },
     },
 ]
 
@@ -365,6 +397,38 @@ def get_data_status(
     )
 
 
+def search_factsheets(
+    conn: sqlite3.Connection, config: AppConfig, args: dict[str, Any]
+) -> dict[str, Any]:
+    query = str(args.get("query", "")).strip()
+    if not query:
+        raise ToolError("query must not be empty")
+    codes = args.get("amfi_codes")
+    funds = [config.fund_by_code(c) for c in _codes(config, codes)] if codes else None
+    month = args.get("month") or None
+    if month is not None and not re.fullmatch(r"\d{4}-\d{2}", str(month)):
+        raise ToolError(f"month must be YYYY-MM, got {month!r}")
+    found = factsheet_search.search(conn, config, query, funds=funds, month=month)
+    return _out(search_output(found))
+
+
+def search_output(found: factsheet_search.SearchResult) -> dict[str, Any]:
+    """A search result as tool output (also used for the search run before the first call)."""
+    output: dict[str, Any] = {
+        "extracts": [h.record() for h in found.hits],
+        "funds_searched": found.funds,
+        "month": found.month or "latest",
+        "search_mode": found.mode,
+        "source": FACTSHEET_SOURCE,
+        "as_of": max((h.as_of for h in found.hits), default=None),
+    }
+    if not found.hits:
+        output["note"] = "Nothing matched: the factsheet pages do not state this."
+    if found.note:
+        output["search_note"] = found.note
+    return output
+
+
 def _count(conn: sqlite3.Connection, table: str) -> int:
     return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
@@ -384,6 +448,7 @@ HANDLERS: dict[str, Handler] = {
     "get_rolling_return_stats": get_rolling_return_stats,
     "get_nav_history": get_nav_history,
     "get_data_status": get_data_status,
+    "search_factsheets": search_factsheets,
 }
 
 

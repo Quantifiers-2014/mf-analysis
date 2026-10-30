@@ -52,6 +52,13 @@ github_branch = "main"
 ter = true        # BER and Total TER from the AMFI TER file (Direct Plan)
 factsheet = true  # AUM, AAUM, turnover and Direct BER from the AMC factsheets
 
+# Chatbot search of the factsheet text (fund pages). mode: keyword (BM25), semantic (Mistral
+# embeddings; needs MISTRAL_API_KEY in the app's secrets) or hybrid (both). The data job keeps
+# embeddings for every chunk when MISTRAL_API_KEY is set, so the mode can be changed any time.
+[settings.factsheet_search]
+mode = "keyword"
+embedding_model = "mistral-embed"
+
 # AMFI TER page "Sub Category" id per fund category, used by the data job.
 # Seen 08-Oct-2026 in the page's request when Sub Category = Arbitrage Fund (strCat=46).
 [settings.amfi_ter_category_ids]
