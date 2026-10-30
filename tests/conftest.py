@@ -17,6 +17,7 @@ from arbitrage_analyser.config import AppConfig, FactsheetSource, load_config
 from arbitrage_analyser.runtime import DATA_DIR_ENV
 from arbitrage_analyser.sources.factsheet_links import Download
 from arbitrage_analyser.sources.factsheet_pdf import FactsheetValues
+from arbitrage_analyser.sources.factsheet_text import Chunk
 from arbitrage_analyser.sources.mfapi import SchemeHistory
 
 CONFIG_TEXT = """
@@ -212,6 +213,22 @@ def factsheet_values(
         n for n, v in (("AAUM", aaum), ("Turnover", turnover), ("Direct BER", ber)) if v is None
     )
     return FactsheetValues(page, as_of, aum, aaum, turnover, ber, missing)
+
+
+FAKE_CHUNKS = [
+    Chunk(
+        "Investment Objective",
+        "Investment Objective\nTo generate income from arbitrage between the cash and derivatives "
+        "(futures) segments of the equity market.",
+    ),
+    Chunk("Expense Ratio", "Expense Ratio\nRegular | 0.90%\nDirect | 0.33%"),
+]
+
+
+@pytest.fixture(autouse=True)
+def _fake_factsheet_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake factsheet PDFs have no text: the job stores FAKE_CHUNKS for them instead."""
+    monkeypatch.setattr(factsheets, "read_chunks", lambda content, page: list(FAKE_CHUNKS))
 
 
 def fake_factsheets(

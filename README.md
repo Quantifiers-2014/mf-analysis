@@ -124,6 +124,35 @@ AMC factsheet PDFs.
   not found), the other funds still load. Update `[funds.factsheet]` (link, page title, turnover
   labels); a layout change may need a rule change and a new fixture page.
 
+## Factsheet search (chatbot)
+
+The chatbot answers questions only a factsheet answers ("does this fund use derivatives?",
+objective, managers, holdings, exit load wording) from the text of each fund's factsheet page.
+
+- **Chunks:** the data job splits the fund page into chunks when it reads the factsheet values
+  (`sources/factsheet_text.py`). The page is cut at blank space into its boxes and columns; a
+  table is read across, so a label stays with its value. Chunks are at most about 250 tokens
+  (a longer box is split by lines, 2 lines repeated). Kept in `published/factsheet_chunks.csv`
+  per fund per month (all months, so past months can be asked about), with page and PDF link.
+- **Search** (`factsheet_search.py`): keyword search (BM25) over the fund(s) named in the question
+  (by AMC name) and the month named ("in August" = data as of 31-Aug), else the latest month, with
+  a few synonyms (derivative ~ futures ~ hedge). It runs before the first model call: the top 3
+  chunks above a score threshold go with the question (at most about 750 tokens); the
+  `search_factsheets` tool returns up to 5 (1,500 tokens). Nothing above the threshold: the
+  chatbot says it is not stated in the factsheet. Answers quote the chunk and link the page; the
+  search shows under "Data used" and in Langfuse.
+- **Embeddings (for search by meaning, phase 2):** with the `MISTRAL_API_KEY` repository secret
+  set, the job embeds new or changed chunks with `mistral-embed` (on every run, so it catches up)
+  into `published/factsheet_embeddings.csv`. `[settings.factsheet_search] mode` switches the
+  chatbot to `semantic` or `hybrid` search; that needs `MISTRAL_API_KEY` in the app's secrets too,
+  and falls back to keyword search when Mistral fails. On Mistral's free tier, turn off training
+  on your data in its admin settings.
+- **Evals:** `python -m arbitrage_analyser eval-search` scores search on `evals/factsheet_search.toml`
+  (24 questions with answers read from the factsheet pages in `tests/data/factsheets`); add
+  `--modes keyword,semantic,hybrid` (needs `MISTRAL_API_KEY`) to compare, and `--answers` to also
+  ask the chatbot each question (needs a model key; pauses between questions for free-tier
+  limits). Reports go to `evals/results/`.
+
 ## Run the app
 
 ```bash
@@ -220,12 +249,16 @@ src/arbitrage_analyser/
   jobs.py                  the data job (update-data)
   publish.py               saving store files to GitHub from the app
   factsheets.py            factsheet values: fetch, checks, values file
+  factsheet_search.py      chatbot search of the factsheet text (chunks, keyword/semantic)
+  embeddings.py            Mistral embeddings for the factsheet chunks
+  evals.py                 factsheet search evals (eval-search)
   services.py              screen read models (reusable by a future API or chatbot)
   cli.py                   command line
   app.py                   Streamlit UI
   chat_ui.py               "Ask the analyst" chat tab
   agent/                   AI agent: tools, prompt, Claude loop, chat storage, Langfuse tracing
 published/                the data store: CSV files with all data (written by the data job)
+evals/                     factsheet search test set and reports
 .github/workflows/         the data job (refresh-data.yml)
 tests/                     unit and app tests
 ```
@@ -236,6 +269,7 @@ tests/                     unit and app tests
 pytest
 ruff check src tests && ruff format --check src tests
 mypy
+python -m arbitrage_analyser eval-search   # factsheet search quality
 ```
 
 ## Known limits (v0)

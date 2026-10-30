@@ -10,6 +10,8 @@ Files (one row per key, sorted, so a change shows as a small diff):
   ter.csv            AMFI TER (Direct Plan) per fund per day
   benchmark.csv      benchmark index values (uploaded in the app)
   factsheet_values.csv  AUM, AAUM, turnover, Direct BER per fund per month (see factsheets.py)
+  factsheet_chunks.csv  text of each fund's factsheet page, in chunks, per month (chatbot search)
+  factsheet_embeddings.csv  an embedding (vector) per chunk text and model (for search by meaning)
   reviewed_flags.csv flags marked reviewed on the Data health screen
 
 Loading checks every line; a bad line is skipped and reported, the rest loads, and that file is
@@ -38,6 +40,8 @@ from arbitrage_analyser.validation import check_series
 BENCHMARK_FILE = "benchmark.csv"
 FACTSHEET_FILE = "factsheet_values.csv"
 REVIEWED_FILE = "reviewed_flags.csv"
+CHUNKS_FILE = "factsheet_chunks.csv"
+EMBEDDINGS_FILE = "factsheet_embeddings.csv"
 
 Parser = Callable[[str], object]
 
@@ -156,11 +160,33 @@ TABLES = (
         {"index_name": _text, "date": _day, "value": _number},
         ("index_name", "date"),
     ),
+    _table(
+        "factsheet_chunks",
+        CHUNKS_FILE,
+        {
+            "amfi_code": _code,
+            "as_of": _day,
+            "chunk_no": _code,
+            "amc": _text,
+            "page": _code,
+            "section": _text,
+            "text": _text,
+            "text_hash": _text,
+            "source_url": _text,
+        },
+        ("amfi_code", "as_of", "chunk_no"),
+    ),
+    _table(
+        "factsheet_embeddings",
+        EMBEDDINGS_FILE,
+        {"text_hash": _text, "model": _text, "vector": _text},
+        ("text_hash", "model"),
+    ),
 )
 FILES = (*(t.file for t in TABLES), FACTSHEET_FILE, REVIEWED_FILE)
 # Who writes which file: the data job never writes what the app saves, and the other way round,
 # so their commits cannot overwrite each other.
-JOB_FILES = ("funds.csv", "nav.csv", "ter.csv", FACTSHEET_FILE)
+JOB_FILES = ("funds.csv", "nav.csv", "ter.csv", FACTSHEET_FILE, CHUNKS_FILE, EMBEDDINGS_FILE)
 APP_FILES = (BENCHMARK_FILE, REVIEWED_FILE)
 
 

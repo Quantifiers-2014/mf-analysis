@@ -66,7 +66,10 @@ def test_save_and_load_round_trip(
     _seed(conn, config)
     folder = tmp_path / "store"
     written = store.save(conn, folder)
-    assert written == [f for f in store.FILES if f != store.REVIEWED_FILE]  # no reviews yet
+    # no reviews or embeddings yet
+    assert written == [
+        f for f in store.FILES if f not in (store.REVIEWED_FILE, store.EMBEDDINGS_FILE)
+    ]
     assert (folder / "nav.csv").read_text().startswith("amfi_code,date,nav\n100001,2019-01-01,")
     assert store.save(conn, folder) == []  # nothing changed: nothing written
 
@@ -279,7 +282,9 @@ def test_update_data_writes_the_store(
     job_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     assert cli.main(["update-data", "--datasets", "nav,factsheets"]) == 0
-    assert {p.name for p in job_env.iterdir()} == {"funds.csv", "nav.csv", "factsheet_values.csv"}
+    assert {p.name for p in job_env.iterdir()} == {
+        "funds.csv", "nav.csv", "factsheet_values.csv", "factsheet_chunks.csv"
+    }  # fmt: skip
     nav = (job_env / "nav.csv").read_text()
     # a later run on a new runner adds only what is new
     monkeypatch.setenv(DB_ENV, str(tmp_path / "runner2.db"))
@@ -330,7 +335,9 @@ def test_job_checks_stored_factsheet_ber_against_new_ter(
 
     monkeypatch.setattr(ingest, "fetch_ter_records", ter)
     results = jobs.fetch(conn, config, TODAY, ["ter"])
-    assert list(results) == ["ter 09-2026", "ter 10-2026", "factsheet BER check"]
+    assert list(results) == [
+        "ter 09-2026", "ter 10-2026", "factsheet BER check", "factsheet embeddings"
+    ]  # fmt: skip
     assert results["factsheet BER check"].new_flags == 1
 
 

@@ -55,6 +55,24 @@ CREATE TABLE IF NOT EXISTS factsheet (
     fetched_at      TEXT NOT NULL,
     PRIMARY KEY (amfi_code, as_of)
 );
+CREATE TABLE IF NOT EXISTS factsheet_chunks (
+    amfi_code   INTEGER NOT NULL,
+    as_of       TEXT NOT NULL,
+    chunk_no    INTEGER NOT NULL,
+    amc         TEXT NOT NULL,
+    page        INTEGER NOT NULL,
+    section     TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    text_hash   TEXT NOT NULL,
+    source_url  TEXT NOT NULL,
+    PRIMARY KEY (amfi_code, as_of, chunk_no)
+);
+CREATE TABLE IF NOT EXISTS factsheet_embeddings (
+    text_hash  TEXT NOT NULL,
+    model      TEXT NOT NULL,
+    vector     TEXT NOT NULL,
+    PRIMARY KEY (text_hash, model)
+);
 CREATE TABLE IF NOT EXISTS validation_flags (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     dataset     TEXT NOT NULL,

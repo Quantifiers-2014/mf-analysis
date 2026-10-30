@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,12 +13,12 @@ from typing import Any
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from arbitrage_analyser import db, ingest
+from arbitrage_analyser import db, factsheet_search, ingest
 from arbitrage_analyser.agent import agent, store, tools
 from arbitrage_analyser.agent.prompt import build_system_prompt
 from arbitrage_analyser.agent.providers import AnthropicProvider
 from arbitrage_analyser.config import AppConfig
-from tests.conftest import growth_series, history_for, ter_rows, xlsx_bytes
+from tests.conftest import FAKE_CHUNKS, growth_series, history_for, ter_rows, xlsx_bytes
 from tests.test_cli_app import APP_PATH, env  # noqa: F401  (env is a fixture)
 
 # ---------- fakes ----------
@@ -91,6 +92,10 @@ def ask(
 
 
 def test_every_tool_cites_source_and_date(seeded: db.sqlite3.Connection, config: AppConfig) -> None:
+    alpha = config.fund_by_code(100001)
+    factsheet_search.store_chunks(
+        seeded, alpha, date(2026, 9, 30), 3, "https://x/a.pdf", FAKE_CHUNKS
+    )
     calls = {
         "list_funds": {},
         "compare_funds": {"category": "Arbitrage"},
@@ -98,6 +103,7 @@ def test_every_tool_cites_source_and_date(seeded: db.sqlite3.Connection, config:
         "get_rolling_return_stats": {"amfi_codes": [100001], "years": 1},
         "get_nav_history": {"amfi_code": 100001, "start_date": "2026-09-01"},
         "get_data_status": {},
+        "search_factsheets": {"query": "Alpha investment objective: derivatives or futures?"},
     }
     assert set(calls) == {spec["name"] for spec in tools.TOOL_SPECS} == set(tools.HANDLERS)
     for name, args in calls.items():

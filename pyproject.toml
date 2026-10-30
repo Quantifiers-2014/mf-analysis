@@ -9,6 +9,7 @@ description = "Internal tool to compare Indian arbitrage mutual funds on returns
 requires-python = ">=3.11,<4.0"  # upper bound needed: Streamlit Cloud installs with Poetry, and langfuse supports <4.0
 dependencies = [
     "pandas>=2.2",
+    "numpy>=1.26",  # factsheet search: embedding vectors
     "streamlit>=1.50",
     "plotly>=5.24",
     "openpyxl>=3.1",

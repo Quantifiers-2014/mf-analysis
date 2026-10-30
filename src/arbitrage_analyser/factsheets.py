@@ -20,15 +20,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from arbitrage_analyser import db
+from arbitrage_analyser import db, factsheet_search
 from arbitrage_analyser.config import AppConfig, FactsheetSource
 from arbitrage_analyser.ingest import LoadResult
 from arbitrage_analyser.sources import SourceError
 from arbitrage_analyser.sources.factsheet_links import Download, download_latest
 from arbitrage_analyser.sources.factsheet_pdf import FactsheetValues, read_factsheet
+from arbitrage_analyser.sources.factsheet_text import Chunk, read_chunks
 
 FactsheetDownloader = Callable[[FactsheetSource, date], Download]
 FactsheetReader = Callable[[bytes, str, dict[str, str]], FactsheetValues]
+Chunker = Callable[[bytes, int], list[Chunk]]  # (PDF, page) -> the page's text chunks
 
 MAX_CRORE = 1_000_000.0  # Rs 10 lakh crore: far above any single scheme's AUM
 MAX_BER_PCT = 2.5  # above SEBI's highest TER limit (2.25%)
@@ -76,17 +78,21 @@ def fetch_factsheets(
     today: date,
     download: FactsheetDownloader | None = None,
     read: FactsheetReader | None = None,
+    chunk: Chunker | None = None,
 ) -> LoadResult:
-    """Download each fund's latest factsheet, read its values, check them and store them.
-    A fund that fails is reported; the others still load. Flags are also listed in the notes.
+    """Download each fund's latest factsheet, read its values, check them and store them, and
+    store the fund page's text in chunks for the chatbot's search. A fund that fails is
+    reported; the others still load. Flags are also listed in the notes.
 
-    `download` and `read` default to the AMC sites and the PDF rules; tests pass fakes.
+    `download`, `read` and `chunk` default to the AMC sites and the PDF rules; tests pass fakes.
     """
     download = download or download_latest
     read = read or read_factsheet
+    chunk = chunk or read_chunks
     result = LoadResult()
     cache: dict[tuple[str | None, str | None, str | None], Download] = {}
     rows: list[FactsheetRow] = []
+    chunk_rows = 0
     fetched_at = now_utc()
     for fund in config.funds:
         source = fund.factsheet
@@ -108,6 +114,15 @@ def fetch_factsheets(
             result.notes.append(
                 f"{fund.name}: not found in the factsheet: {', '.join(values.missing)}"
             )
+        try:
+            chunks = chunk(pdf.content, values.page)
+            if not chunks:
+                raise SourceError(f"no text found on page {values.page}")
+            chunk_rows += factsheet_search.store_chunks(
+                conn, fund, values.as_of, values.page, pdf.url, chunks
+            )
+        except SourceError as exc:
+            result.errors.append(f"{fund.name}: factsheet text not stored for search: {exc}")
         rows.append(
             FactsheetRow(
                 fund.amfi_code,
@@ -122,6 +137,8 @@ def fetch_factsheets(
             )
         )
     _store(conn, config, rows, result, report_flags=True)
+    if chunk_rows:
+        result.notes.append(f"Factsheet text: {chunk_rows} chunk(s) stored for search")
     not_set = [f.name for f in config.funds if f.factsheet is None]
     if not_set:
         result.notes.append("No factsheet set in config: " + ", ".join(not_set))

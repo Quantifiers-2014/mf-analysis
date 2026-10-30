@@ -1,0 +1,258 @@
+# Test set for the chatbot's factsheet search (python -m arbitrage_analyser eval-search).
+#
+# PDFs: real AMC factsheets, cut to each fund's page (tests/data/factsheets). Data as of
+# 30-Sep-2026, plus 31-Aug-2026 for Nippon (for questions about a past month).
+#
+# Each question: the fund and data date (as_of) holding the answer; chunk_has = words the answer
+# chunk contains (all of them); answer_has = words a correct answer contains (any of them);
+# not_stated = true when the factsheet does not answer it. Answers were read from the PDFs.
+# kind: value | not printed | past month | yes/no | other wording | text | not stated
+
+[[pdfs]]
+fund = "Kotak Arbitrage Fund"
+file = "tests/data/factsheets/kotak_2026-09.pdf"
+
+[[pdfs]]
+fund = "SBI Arbitrage Opportunities Fund"
+file = "tests/data/factsheets/sbi_2026-09.pdf"
+
+[[pdfs]]
+fund = "ICICI Prudential Arbitrage Fund"
+file = "tests/data/factsheets/icici_2026-09.pdf"
+
+[[pdfs]]
+fund = "Invesco India Arbitrage Fund"
+file = "tests/data/factsheets/invesco_2026-09.pdf"
+
+[[pdfs]]
+fund = "Aditya Birla Sun Life Arbitrage Fund"
+file = "tests/data/factsheets/absl_2026-09.pdf"
+
+[[pdfs]]
+fund = "Tata Arbitrage Fund"
+file = "tests/data/factsheets/tata_2026-09.pdf"
+
+[[pdfs]]
+fund = "Nippon India Arbitrage Fund"
+file = "tests/data/factsheets/nippon_2026-08.pdf"
+
+[[pdfs]]
+fund = "Nippon India Arbitrage Fund"
+file = "tests/data/factsheets/nippon_2026-09.pdf"
+
+[[pdfs]]
+fund = "Edelweiss Arbitrage Fund"
+file = "tests/data/factsheets/edelweiss_2026-09.pdf"
+
+[[questions]]
+id = "q01"
+kind = "value"
+question = "What is the Direct Plan base expense ratio of the Edelweiss Arbitrage Fund?"
+fund = "Edelweiss Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Base Expense Ratio", "Direct Plan: | 0.33%"]
+answer_has = ["0.33%", "0.33"]
+
+[[questions]]
+id = "q02"
+kind = "value"
+question = "What closing AUM does the ICICI Prudential arbitrage factsheet show?"
+fund = "ICICI Prudential Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Closing AUM as on 30-Sep-26", "35,576.34"]
+answer_has = ["35,576.34", "35576.34"]
+
+[[questions]]
+id = "q03"
+kind = "value"
+question = "What is the gross exposure turnover of the SBI arbitrage fund?"
+fund = "SBI Arbitrage Opportunities Fund"
+as_of = "2026-09-30"
+chunk_has = ["Gross Exposure Turnover | 11.57"]
+answer_has = ["11.57"]
+
+[[questions]]
+id = "q04"
+kind = "not printed"
+question = "What portfolio turnover does the Nippon India Arbitrage Fund report?"
+fund = "Nippon India Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Equity Turnover | NA", "Gross Exposure Turnover | NA"]
+answer_has = ["NA", "not applicable"]
+
+[[questions]]
+id = "q05"
+kind = "past month"
+question = "What was the Nippon arbitrage fund's gross exposure turnover in August 2026?"
+fund = "Nippon India Arbitrage Fund"
+as_of = "2026-08-31"
+chunk_has = ["Gross Exposure Turnover | 11.21"]
+answer_has = ["11.21"]
+
+[[questions]]
+id = "q06"
+kind = "past month"
+question = "What was the AUM of the Nippon India Arbitrage Fund in August?"
+fund = "Nippon India Arbitrage Fund"
+as_of = "2026-08-31"
+chunk_has = ["17532.65"]
+answer_has = ["17532.65", "17,532.65"]
+
+[[questions]]
+id = "q07"
+kind = "value"
+question = "What is the latest AUM of the Nippon India Arbitrage Fund as per its factsheet?"
+fund = "Nippon India Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["17,215.96"]
+answer_has = ["17,215.96", "17215.96"]
+
+[[questions]]
+id = "q08"
+kind = "yes/no"
+question = "Is the Kotak arbitrage fund involved in derivatives trading?"
+fund = "Kotak Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Equity Derivative Exposuer is 73.47%"]
+answer_has = ["73.47%", "73.47"]
+
+[[questions]]
+id = "q09"
+kind = "other wording"
+question = "Does Invesco hedge its stock positions?"
+fund = "Invesco India Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Futures (Short) against the above Equity Stocks"]
+answer_has = ["futures"]
+
+[[questions]]
+id = "q10"
+kind = "text"
+question = "What is the investment objective of the SBI arbitrage fund?"
+fund = "SBI Arbitrage Opportunities Fund"
+as_of = "2026-09-30"
+chunk_has = ["Investment Objective", "capital appreciation and regular income"]
+answer_has = ["capital appreciation"]
+
+[[questions]]
+id = "q11"
+kind = "text"
+question = "Who manages the Edelweiss Arbitrage Fund?"
+fund = "Edelweiss Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Bhavesh Jain", "Amit Vora"]
+answer_has = ["Bhavesh Jain"]
+
+[[questions]]
+id = "q12"
+kind = "text"
+question = "What is the exit load of the Aditya Birla Sun Life Arbitrage Fund?"
+fund = "Aditya Birla Sun Life Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Exit Load: NIL"]
+answer_has = ["nil"]
+
+[[questions]]
+id = "q13"
+kind = "value"
+question = "What is the Sharpe ratio of the Tata Arbitrage Fund?"
+fund = "Tata Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Sharpe Ratio (%) | 2.77"]
+answer_has = ["2.77"]
+
+[[questions]]
+id = "q14"
+kind = "other wording"
+question = "Which stock is the biggest position in the Tata arbitrage portfolio?"
+fund = "Tata Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Top 10 Holdings", "1 HDFC Bank Ltd. | 7.89%"]
+answer_has = ["HDFC Bank"]
+
+[[questions]]
+id = "q15"
+kind = "value"
+question = "What is the yield to maturity of the Edelweiss Arbitrage Fund?"
+fund = "Edelweiss Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Yield to Maturity (%) | 6.77"]
+answer_has = ["6.77"]
+
+[[questions]]
+id = "q16"
+kind = "other wording"
+question = "Which sector does the SBI arbitrage fund put the most money in?"
+fund = "SBI Arbitrage Opportunities Fund"
+as_of = "2026-09-30"
+chunk_has = ["Allocation of Net Asset by Sectors", "Financial Services | 34.44"]
+answer_has = ["Financial Services"]
+
+[[questions]]
+id = "q17"
+kind = "text"
+question = "Since when has Deepak Gupta managed the Invesco India Arbitrage Fund?"
+fund = "Invesco India Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Deepak Gupta", "Since November 11, 2021"]
+answer_has = ["November 11, 2021", "11-Nov-2021", "Nov 2021"]
+
+[[questions]]
+id = "q18"
+kind = "value"
+question = "What is the Direct plan BER of ICICI Prudential Arbitrage Fund in its factsheet?"
+fund = "ICICI Prudential Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Base Expense Ratio", "Direct : 0.34% p. a."]
+answer_has = ["0.34%", "0.34"]
+
+[[questions]]
+id = "q19"
+kind = "text"
+question = "What exit load does Kotak Arbitrage Fund charge?"
+fund = "Kotak Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Exit Load", "within 30 days from the date of", "allotment of units: 0.25%"]
+answer_has = ["30 days"]
+
+[[questions]]
+id = "q20"
+kind = "value"
+question = "What is the folio count of Kotak Arbitrage Fund?"
+fund = "Kotak Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["Folio Count: | 1,57,424"]
+answer_has = ["1,57,424", "157424", "157,424"]
+
+[[questions]]
+id = "q21"
+kind = "not stated"
+question = "Who is the auditor of the Tata Arbitrage Fund?"
+fund = "Tata Arbitrage Fund"
+as_of = "2026-09-30"
+not_stated = true
+
+[[questions]]
+id = "q22"
+kind = "not stated"
+question = "What is the lock-in period of the Edelweiss Arbitrage Fund?"
+fund = "Edelweiss Arbitrage Fund"
+as_of = "2026-09-30"
+not_stated = true
+
+[[questions]]
+id = "q23"
+kind = "not stated"
+question = "Which credit rating agency rates the Nippon India Arbitrage Fund?"
+fund = "Nippon India Arbitrage Fund"
+as_of = "2026-09-30"
+not_stated = true
+
+[[questions]]
+id = "q24"
+kind = "other wording"
+question = "Does the Aditya Birla Sun Life arbitrage fund hedge?"
+fund = "Aditya Birla Sun Life Arbitrage Fund"
+as_of = "2026-09-30"
+chunk_has = ["equity related securities including derivatives", "(Cash & Futures)"]
+answer_has = ["derivatives", "futures"]
